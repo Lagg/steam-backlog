@@ -1,0 +1,109 @@
+#!/usr/bin/env python
+
+import urllib2
+from urllib import urlencode
+import re
+import operator
+import argparse
+
+import steam
+from bs4 import BeautifulSoup
+
+hoursurl = "http://www.howlongtobeat.com/search_main.php?t=games&page=1&sorthead=popular&sortd=Normal%20Order&plat=&detail=0"
+hoursexp = re.compile(r"([0-9]+)[^0-9]* Hours")
+
+def fetch_times(game):
+    """ I feel like a bit of an asshole for doing this, hence the guilty header. Sorry :( """
+    query = urlencode({"queryString": game["name"].encode("utf-8")})
+    hours = []
+
+    try:
+        playtimes_request = urllib2.Request(hoursurl, query, {
+            "User-Agent": "Mozilla/5.0 (Windows NT 6.1; WOW64; rv:33.0) Gecko/20100101 Firefox/33.0",
+            "X-Fetched-By": "Lagg's backlog helper. Forgive the scraping."})
+        playtimes = urllib2.urlopen(playtimes_request)
+    except urllib2.URLError:
+        print(u"Failed downloading {0[name]}".format(game))
+        return 0
+
+    soup = BeautifulSoup(playtimes.read())
+    matches = soup.findAll(class_="gamelist_details")
+
+    if len(matches) > 0:
+        match = matches[0]
+        tidbits = match.findAll(class_="gamelist_tidbit")
+
+        for tidbit in tidbits:
+            tidbit_match = hoursexp.search(tidbit.text)
+            if tidbit_match:
+                # Convert to minutes for consistency with steam
+                hours.append(int(tidbit_match.group(1)) * 60)
+
+    #return sorted(hours, reverse=True)
+    if hours:
+        return float(sum(hours)) / len(hours)
+    else:
+        print(u"No times for {0[name]}".format(game))
+        return 0
+
+
+if __name__ == "__main__":
+    cmdline = argparse.ArgumentParser(description="Write out suggestions for your backlog and potential games to revisit")
+    cmdline.add_argument("-k", "--key", help="Your API key", required=True)
+    cmdline.add_argument("-u", "--user", help="Steam user (id64 or vanity)", required=True)
+    cmdline.add_argument("-s", "--summary-file", default="summary.tsv", help="Filename to write the backlog order suggestions")
+    cmdline.add_argument("-r", "--revisit-file", default="revisit.tsv", help="Filename to write revisit suggestions")
+    opts = cmdline.parse_args()
+
+    steam.api.key.set(opts.key)
+
+    if opts.user.isdigit():
+        profile_id64 = opts.user
+    else:
+        profile_id64 = steam.user.vanity_url(opts.user).id64
+
+    games = steam.api.interface("IPlayerService").GetOwnedGames(steamid=profile_id64, include_appinfo=1, include_played_free_games=1)
+    total_times = []
+
+    for game in games["response"]["games"]:
+        playtimeforever = game["playtime_forever"]
+        total_times.append(playtimeforever)
+
+    my_average_minutes = round(float(sum(total_times)) / len(total_times), 2)
+    print("Average playtime: {0}".format(my_average_minutes / 60))
+
+    theirtimes = []
+
+    print("\nBacklog execution order:\n")
+    for game in games["response"]["games"]:
+        if game["playtime_forever"] > 0:
+            continue
+
+        hltb_times = fetch_times(game)
+
+        if not hltb_times:
+            continue
+
+        theirtimes.append((game["name"], hltb_times))
+
+        if hltb_times < my_average_minutes:
+            print(u"{0:<25}\t{1:.2f}".format(game["name"][:25], hltb_times / 60))
+
+    output = open(opts.summary_file, "w")
+
+    for name, minutes in sorted(theirtimes, key=operator.itemgetter(1)):
+        output.write(u"{0:<25}\t{1:.2f}\n".format(name[:25], minutes / 60).encode("utf-8"))
+
+    output.close()
+
+    print("\nRevisitation candidates:\n")
+    revisitation_output = open(opts.revisit_file, "w")
+    for game in sorted(games["response"]["games"], key=operator.itemgetter("playtime_forever")):
+        playtime_forever = float(game["playtime_forever"])
+        if "playtime_2weeks" not in game and playtime_forever > 0 and playtime_forever < my_average_minutes:
+            hltb = fetch_times(game)
+            if hltb > playtime_forever:
+                line = u"{0:<25}\t{1:.2f}\t{2:.2f}".format(game["name"][:25], playtime_forever / 60, hltb / 60)
+                print(line)
+                revisitation_output.write(line.encode("utf-8") + '\n')
+    revisitation_output.close()

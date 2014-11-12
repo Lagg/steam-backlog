@@ -62,20 +62,21 @@ if __name__ == "__main__":
     else:
         profile_id64 = steam.user.vanity_url(opts.user).id64
 
-    games = steam.api.interface("IPlayerService").GetOwnedGames(steamid=profile_id64, include_appinfo=1, include_played_free_games=1)
-    total_times = []
+    games = sorted(steam.api.interface("IPlayerService").GetOwnedGames(steamid=profile_id64,
+        include_appinfo=1, include_played_free_games=1)["response"]["games"],
+        key=operator.itemgetter("playtime_forever"))
 
-    for game in games["response"]["games"]:
-        playtimeforever = game["playtime_forever"]
-        total_times.append(playtimeforever)
+    total_minutes = sum(map(operator.itemgetter("playtime_forever"), games))
+    my_average_minutes = round(float(total_minutes) / len(games), 2)
+    max_game_name_length = sorted(map(len, map(operator.itemgetter("name"), games)), reverse=True)[0]
+    column_format = u"{0:<" + str(max_game_name_length + 2) + "}\t{1:.2f}"
 
-    my_average_minutes = round(float(sum(total_times)) / len(total_times), 2)
     print("Average playtime: {0}".format(my_average_minutes / 60))
 
     theirtimes = []
 
     print("\nBacklog execution order:\n")
-    for game in games["response"]["games"]:
+    for game in games:
         if game["playtime_forever"] > 0:
             continue
 
@@ -87,23 +88,23 @@ if __name__ == "__main__":
         theirtimes.append((game["name"], hltb_times))
 
         if hltb_times < my_average_minutes:
-            print(u"{0:<25}\t{1:.2f}".format(game["name"][:25], hltb_times / 60))
+            print(column_format.format(game["name"][:72], hltb_times / 60))
 
     output = open(opts.summary_file, "w")
 
     for name, minutes in sorted(theirtimes, key=operator.itemgetter(1)):
-        output.write(u"{0:<25}\t{1:.2f}\n".format(name[:25], minutes / 60).encode("utf-8"))
+        output.write((column_format + "\n").format(name[:72], minutes / 60).encode("utf-8"))
 
     output.close()
 
     print("\nRevisitation candidates:\n")
     revisitation_output = open(opts.revisit_file, "w")
-    for game in sorted(games["response"]["games"], key=operator.itemgetter("playtime_forever")):
+    for game in games:
         playtime_forever = float(game["playtime_forever"])
         if "playtime_2weeks" not in game and playtime_forever > 0 and playtime_forever < my_average_minutes:
             hltb = fetch_times(game)
             if hltb > playtime_forever:
-                line = u"{0:<25}\t{1:.2f}\t{2:.2f}".format(game["name"][:25], playtime_forever / 60, hltb / 60)
+                line = (column_format + "\t{2:.2f}").format(game["name"][:72], playtime_forever / 60, hltb / 60)
                 print(line)
                 revisitation_output.write(line.encode("utf-8") + '\n')
     revisitation_output.close()

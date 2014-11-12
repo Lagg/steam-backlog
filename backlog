@@ -5,6 +5,8 @@ from urllib import urlencode
 import re
 import operator
 import argparse
+import logging
+import sys
 
 import steam
 from bs4 import BeautifulSoup
@@ -23,7 +25,7 @@ def fetch_times(game):
             "X-Fetched-By": "Lagg's backlog helper. Forgive the scraping."})
         playtimes = urllib2.urlopen(playtimes_request)
     except urllib2.URLError:
-        print(u"Failed downloading {0[name]}".format(game))
+        logging.error(u"Failed downloading {0[name]}".format(game))
         return 0
 
     soup = BeautifulSoup(playtimes.read())
@@ -43,7 +45,7 @@ def fetch_times(game):
     if hours:
         return float(sum(hours)) / len(hours)
     else:
-        print(u"No times for {0[name]}".format(game))
+        logging.warn(u"No times for {0[name]} ({1:.2f} hrs)".format(game, float(game["playtime_forever"]) / 60))
         return 0
 
 
@@ -53,7 +55,10 @@ if __name__ == "__main__":
     cmdline.add_argument("-u", "--user", help="Steam user (id64 or vanity)", required=True)
     cmdline.add_argument("-s", "--summary-file", default="summary.tsv", help="Filename to write the backlog order suggestions")
     cmdline.add_argument("-r", "--revisit-file", default="revisit.tsv", help="Filename to write revisit suggestions")
+    cmdline.add_argument("-e", "--error-file", default="errors.log", help="Filename to write errors and warnings. Set /dev/null to suppress")
     opts = cmdline.parse_args()
+
+    logging.basicConfig(filename=opts.error_file, level=logging.WARN, filemode="w")
 
     steam.api.key.set(opts.key)
 
@@ -71,11 +76,11 @@ if __name__ == "__main__":
     max_game_name_length = sorted(map(len, map(operator.itemgetter("name"), games)), reverse=True)[0]
     column_format = u"{0:<" + str(max_game_name_length + 2) + "}\t{1:.2f}"
 
-    print("Average playtime: {0}".format(my_average_minutes / 60))
+    print("Our average playtime: {0:.2f} hrs\n".format(my_average_minutes / 60))
 
     theirtimes = []
 
-    print("\nBacklog execution order:\n")
+    print("Finding backlog times\n")
     for game in games:
         if game["playtime_forever"] > 0:
             continue
@@ -97,7 +102,7 @@ if __name__ == "__main__":
 
     output.close()
 
-    print("\nRevisitation candidates:\n")
+    print("\nDetermining candidates for revisitation\n")
     revisitation_output = open(opts.revisit_file, "w")
     for game in games:
         playtime_forever = float(game["playtime_forever"])

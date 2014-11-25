@@ -18,6 +18,13 @@ from bs4 import BeautifulSoup
 
 hoursurl = "http://www.howlongtobeat.com/search_main.php?t=games&page=1&sorthead=popular&sortd=Normal%20Order&plat=&detail=0"
 hoursexp = re.compile(r"([0-9]+)[^0-9]* Hours")
+reviewsurl = "http://steamcommunity.com/app/{0}/reviews/?browsefilter=toprated&p=1"
+reviewshoursexp = re.compile(r"(\d+\.\d+) hrs on record")
+
+httpheaders = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 6.1; WOW64; rv:33.0) Gecko/20100101 Firefox/33.0",
+        "X-Fetched-By": "Lagg's backlog helper. Forgive the scraping."
+        }
 
 def fetch_times(game):
     """ I feel like a bit of an asshole for doing this, hence the guilty header. Sorry :( """
@@ -25,9 +32,7 @@ def fetch_times(game):
     hours = []
 
     try:
-        playtimes_request = urllib2.Request(hoursurl, query, {
-            "User-Agent": "Mozilla/5.0 (Windows NT 6.1; WOW64; rv:33.0) Gecko/20100101 Firefox/33.0",
-            "X-Fetched-By": "Lagg's backlog helper. Forgive the scraping."})
+        playtimes_request = urllib2.Request(hoursurl, query, httpheaders)
         playtimes = urllib2.urlopen(playtimes_request)
     except urllib2.URLError:
         logging.error(u"Failed downloading {0[name]}".format(game))
@@ -53,6 +58,59 @@ def fetch_times(game):
         logging.warn(u"No times for {0[name]} ({1:.2f} hrs)".format(game, float(game["playtime_forever"]) / 60))
         return 0
 
+def fetch_review_times(game):
+    try:
+        req = urllib2.Request(reviewsurl.format(game["appid"]), None, httpheaders)
+        times = urllib2.urlopen(req)
+    except urllib2.URLerror:
+        logging.error(u"Failed fetching review page for {0[name]}".format(game))
+        return 0
+
+    soup = BeautifulSoup(times.read())
+    cards = soup.findAll(class_="apphub_Card")
+    hours = []
+
+    for card in cards:
+        hr = card.find(class_="hours")
+
+        if not hr:
+            continue
+
+        hrmatch = reviewshoursexp.search(hr.text)
+
+        if hrmatch:
+            hours.append(float(hrmatch.group(1)))
+
+    return sum(hours) / len(hours)
+
+class progress_line(object):
+    """ Could be cleaner, I know """
+    def __init__(self, start, end, fmt="{0}/{1}\n"):
+        self._start = start
+        self._end = end
+        self._lastline = None
+        self._fmt = fmt
+
+    def wipe(self):
+        if not self._lastline:
+            return
+
+        sys.stderr.write("\x1b[1A")
+        sys.stderr.write("\x1b[" + str(len(self._lastline)) + "D")
+        sys.stderr.write("\x1b[K")
+        self._lastline = None
+
+    def inc(self, by=1):
+        self.wipe()
+        self._start += by
+        self._lastline = self._fmt.format(self._start, self._end)
+        sys.stderr.write(self._lastline)
+
+    def dec(self, by=1):
+        self.wipe()
+        self._start -= by
+        self._lastline = self._fmt.format(self._start, self._end)
+        sys.stderr.write(self._lastline)
 
 if __name__ == "__main__":
     cmdline = argparse.ArgumentParser(description="Write out suggestions for your backlog and potential games to revisit")
@@ -64,6 +122,8 @@ if __name__ == "__main__":
     opts = cmdline.parse_args()
 
     logging.basicConfig(filename=opts.error_file, level=logging.WARN, filemode="w")
+
+    print("Writting warnings and errors to " + opts.error_file)
 
     steam.api.key.set(opts.key)
 
@@ -81,12 +141,15 @@ if __name__ == "__main__":
     max_game_name_length = sorted(map(len, map(operator.itemgetter("name"), games)), reverse=True)[0]
     column_format = u"{0:<" + str(max_game_name_length + 2) + "}\t{1:.2f}"
 
-    print("Our average playtime: {0:.2f} hrs\n".format(my_average_minutes / 60))
+    print("Our average playtime: {0:.2f} hrs".format(my_average_minutes / 60))
 
     theirtimes = []
 
-    print("Finding backlog times\n")
+    print("Finding backlog times")
+    progress = progress_line(0, len(games))
     for game in games:
+        progress.inc()
+
         if game["playtime_forever"] > 0:
             continue
 
@@ -97,24 +160,25 @@ if __name__ == "__main__":
 
         theirtimes.append((game["name"], hltb_times))
 
-        if hltb_times < my_average_minutes:
-            print(column_format.format(game["name"][:72], hltb_times / 60))
+    print("Writing backlog summary to " + opts.summary_file)
+    with open(opts.summary_file, "w") as output:
+        for name, minutes in sorted(theirtimes, key=operator.itemgetter(1)):
+            output.write((column_format + "\n").format(name, minutes / 60).encode("utf-8"))
 
-    output = open(opts.summary_file, "w")
-
-    for name, minutes in sorted(theirtimes, key=operator.itemgetter(1)):
-        output.write((column_format + "\n").format(name[:72], minutes / 60).encode("utf-8"))
-
-    output.close()
-
-    print("\nDetermining candidates for revisitation\n")
-    revisitation_output = open(opts.revisit_file, "w")
+    print("Determining candidates for revisitation")
+    revisit_games = []
+    progress = progress_line(0, len(games))
     for game in games:
+        progress.inc()
         playtime_forever = float(game["playtime_forever"])
         if "playtime_2weeks" not in game and playtime_forever > 0 and playtime_forever < my_average_minutes:
             hltb = fetch_times(game)
             if hltb > playtime_forever:
-                line = (column_format + "\t{2:.2f}").format(game["name"][:72], playtime_forever / 60, hltb / 60)
-                print(line)
-                revisitation_output.write(line.encode("utf-8") + '\n')
-    revisitation_output.close()
+                revisit_candidate = {"name": game["name"], "hrs": playtime_forever / 60, "theirhrs": hltb / 60}
+                revisit_games.append(revisit_candidate)
+
+    print("Writing revisitation candidates to " + opts.revisit_file)
+    with open(opts.revisit_file, "w") as revisitation_output:
+        for game in sorted(revisit_games, key=operator.itemgetter("theirhrs")):
+            line = (column_format + "\t{2:.2f}").format(game["name"], game["hrs"], game["theirhrs"])
+            revisitation_output.write(line.encode("utf-8") + '\n')

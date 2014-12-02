@@ -16,8 +16,13 @@ import sys
 import steam
 from bs4 import BeautifulSoup
 
+fractionalchars = {u'\xbc': 0.25,
+                   u'\xbd': 0.50,
+                   u'\xbe': 0.75
+                  }
+
 hoursurl = "http://www.howlongtobeat.com/search_main.php?t=games&page=1&sorthead=popular&sortd=Normal%20Order&plat=&detail=0"
-hoursexp = re.compile(r"([0-9]+)[^0-9]* Hours")
+hoursexp = re.compile(r"([0-9]+)([^0-9]*) Hours")
 reviewsurl = "http://steamcommunity.com/app/{0}/reviews/?browsefilter=toprated&p=1"
 reviewshoursexp = re.compile(r"(\d+\.\d+) hrs on record")
 
@@ -48,8 +53,14 @@ def fetch_times(game):
         for tidbit in tidbits:
             tidbit_match = hoursexp.search(tidbit.text)
             if tidbit_match:
+                hrsrounded = int(tidbit_match.group(1))
+                fractional = tidbit_match.group(2)
+
+                if fractional:
+                    hrsrounded += fractionalchars.get(fractional, 0)
+
                 # Convert to minutes for consistency with steam
-                hours.append(int(tidbit_match.group(1)) * 60)
+                hours.append(hrsrounded * 60)
 
     #return sorted(hours, reverse=True)
     if hours:

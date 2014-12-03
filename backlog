@@ -134,7 +134,7 @@ if __name__ == "__main__":
 
     logging.basicConfig(filename=opts.error_file, level=logging.WARN, filemode="w")
 
-    print("Writting warnings and errors to " + opts.error_file)
+    print("Writing warnings and errors to " + opts.error_file)
 
     steam.api.key.set(opts.key)
 

@@ -34,7 +34,7 @@ httpheaders = {
 def fetch_times(game):
     """ I feel like a bit of an asshole for doing this, hence the guilty header. Sorry :( """
     query = urlencode({"queryString": game["name"].encode("utf-8")})
-    hours = []
+    hours = {}
 
     try:
         playtimes_request = urllib2.Request(hoursurl, query, httpheaders)
@@ -48,26 +48,30 @@ def fetch_times(game):
 
     if len(matches) > 0:
         match = matches[0]
-        tidbits = match.findAll(class_="gamelist_tidbit")
+        tidbits = match.findAll("div", class_="gamelist_tidbit")
+        last_tidbit_type = None
 
         for tidbit in tidbits:
             tidbit_match = hoursexp.search(tidbit.text)
             if tidbit_match:
-                hrsrounded = int(tidbit_match.group(1))
+                hrsrounded = float(tidbit_match.group(1))
                 fractional = tidbit_match.group(2)
 
                 if fractional:
                     hrsrounded += fractionalchars.get(fractional, 0)
 
-                # Convert to minutes for consistency with steam
-                hours.append(hrsrounded * 60)
+                # Should never already exist, if it does there's a bug
+                assert (last_tidbit_type and last_tidbit_type not in hours)
 
-    #return sorted(hours, reverse=True)
-    if hours:
-        return float(sum(hours)) / len(hours)
-    else:
-        logging.warn(u"No times for {0[name]} ({1:.2f} hrs)".format(game, float(game["playtime_forever"]) / 60))
-        return 0
+                # Convert to minutes for consistency with steam
+                hours[last_tidbit_type] = hrsrounded * 60
+            elif ' '.join(tidbit["class"]).find("time_") == -1:
+                last_tidbit_type = tidbit.text
+
+    if not hours:
+        logging.warn(u"No times for {0[name]} ({0[appid]}) ({1:.2f} hrs)".format(game, float(game["playtime_forever"]) / 60))
+
+    return hours
 
 def fetch_review_times(game):
     try:
@@ -123,14 +127,48 @@ class progress_line(object):
         self._lastline = self._fmt.format(self._start, self._end)
         sys.stderr.write(self._lastline)
 
+def longest_elem(iterable):
+    if not iterable:
+        return 0
+
+    return sorted(map(len, iterable), reverse=True)[0]
+
+def write_game_rows(stream, rows):
+    """
+    rows is a list of tuples, the first element
+    of the tuple should be the initial game name string
+    and the rest are hours
+    """
+    longest_name = str(longest_elem(map(operator.itemgetter(0), rows)) + 2)
+    for row in rows:
+        name = row[0]
+        hrs = row[1:]
+        line = (u"{0:<" + longest_name + "}\t").format(name) + '\t'.join(["{0:0.2f}".format(hr) for hr in hrs]) + '\n'
+        stream.write(line.encode("utf-8"))
+
+def convert_arg_line(line):
+    tok = line.find('=')
+    args = []
+
+    if tok != -1:
+        args = ["--" + line[:tok], line[tok + 1:]]
+    else:
+        args = ["--" + line]
+
+    return map(str.strip, args)
+
 if __name__ == "__main__":
-    cmdline = argparse.ArgumentParser(description="Write out suggestions for your backlog and potential games to revisit")
+    cmdline = argparse.ArgumentParser(description="Write out suggestions for your backlog and potential games to revisit", fromfile_prefix_chars='@')
     cmdline.add_argument("-k", "--key", help="Your API key", required=True)
     cmdline.add_argument("-u", "--user", help="Steam user (id64 or vanity)", required=True)
     cmdline.add_argument("-s", "--summary-file", default="summary.tsv", help="Filename to write the backlog order suggestions")
     cmdline.add_argument("-r", "--revisit-file", default="revisit.tsv", help="Filename to write revisit suggestions")
     cmdline.add_argument("-e", "--error-file", default="errors.log", help="Filename to write errors and warnings. Set /dev/null to suppress")
+    cmdline.add_argument("-i", "--ignore", required=False, default="", help="A comma separated list of app IDs to ignore")
+    cmdline.convert_arg_line_to_args = convert_arg_line
     opts = cmdline.parse_args()
+
+    ignored_apps = [app.strip() for app in opts.ignore.split(',') if app.strip()]
 
     logging.basicConfig(filename=opts.error_file, level=logging.WARN, filemode="w")
 
@@ -144,19 +182,34 @@ if __name__ == "__main__":
         profile_id64 = steam.user.vanity_url(opts.user).id64
 
     games = sorted(steam.api.interface("IPlayerService").GetOwnedGames(steamid=profile_id64,
-        include_appinfo=1, include_played_free_games=1)["response"]["games"],
-        key=operator.itemgetter("playtime_forever"))
+                   include_appinfo=1, include_played_free_games=1)["response"]["games"],
+                   key=operator.itemgetter("playtime_forever"))
 
     total_minutes = sum(map(operator.itemgetter("playtime_forever"), games))
     my_average_minutes = round(float(total_minutes) / len(games), 2)
-    max_game_name_length = sorted(map(len, map(operator.itemgetter("name"), games)), reverse=True)[0]
-    column_format = u"{0:<" + str(max_game_name_length + 2) + "}\t{1:.2f}"
 
     print("Our average playtime: {0:.2f} hrs".format(my_average_minutes / 60))
 
-    theirtimes = []
+    # Filter out ignore apps after initial averages dump
+    # Not using builtin here so that a bit of explicit logging can be done about
+    # what's getting filtered
+    filtered_games = []
+    processed_games = []
+
+    for game in games:
+        if str(game["appid"]) in ignored_apps:
+            filtered_games.append(game)
+        else:
+            processed_games.append(game)
+
+    games = processed_games
+
+    if filtered_games:
+        logging.warn(u"Filtering {0} games: {1}".format(len(filtered_games),
+            ", ".join([game["name"] + " (" + str(game["appid"]) + ")" for game in filtered_games])))
 
     print("Finding backlog times")
+    backlog_games = []
     progress = progress_line(0, len(games))
     for game in games:
         progress.inc()
@@ -169,12 +222,17 @@ if __name__ == "__main__":
         if not hltb_times:
             continue
 
-        theirtimes.append((game["name"], hltb_times))
+        try:
+            projected_time = hltb_times.get("Completionist", hltb_times["Main Story"])
+        except KeyError:
+            logging.warn(u"No good backlog value for {0[name]} ({0[appid]}), using default max".format(game))
+            projected_time = sorted(hltb_times.values(), reverse=True)[0]
+
+        backlog_games.append(("{0[appid]:<6}\t{0[name]}".format(game), projected_time / 60))
 
     print("Writing backlog summary to " + opts.summary_file)
     with open(opts.summary_file, "w") as output:
-        for name, minutes in sorted(theirtimes, key=operator.itemgetter(1)):
-            output.write((column_format + "\n").format(name, minutes / 60).encode("utf-8"))
+        write_game_rows(output, sorted(backlog_games, key=operator.itemgetter(1)))
 
     print("Determining candidates for revisitation")
     revisit_games = []
@@ -183,13 +241,20 @@ if __name__ == "__main__":
         progress.inc()
         playtime_forever = float(game["playtime_forever"])
         if "playtime_2weeks" not in game and playtime_forever > 0 and playtime_forever < my_average_minutes:
-            hltb = fetch_times(game)
-            if hltb > playtime_forever:
-                revisit_candidate = {"name": game["name"], "hrs": playtime_forever / 60, "theirhrs": hltb / 60}
-                revisit_games.append(revisit_candidate)
+            hltb_times = fetch_times(game)
+
+            if not hltb_times:
+                continue
+
+            try:
+                projected_time = hltb_times.get("Main + Extra", hltb_times["Main Story"])
+            except KeyError:
+                logging.warn(u"No good backlog value for {0[name]} ({0[appid]}), using default max".format(game))
+                projected_time = sorted(hltb_times.values(), reverse=True)[0]
+
+            if projected_time > playtime_forever:
+                revisit_games.append(("{0[appid]:<6}\t{0[name]}".format(game), playtime_forever / 60, projected_time / 60))
 
     print("Writing revisitation candidates to " + opts.revisit_file)
     with open(opts.revisit_file, "w") as revisitation_output:
-        for game in sorted(revisit_games, key=operator.itemgetter("theirhrs")):
-            line = (column_format + "\t{2:.2f}").format(game["name"], game["hrs"], game["theirhrs"])
-            revisitation_output.write(line.encode("utf-8") + '\n')
+        write_game_rows(revisitation_output, sorted(revisit_games, key=operator.itemgetter(2)))

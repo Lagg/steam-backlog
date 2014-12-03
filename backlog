@@ -63,15 +63,22 @@ def fetch_times(game):
                 # Should never already exist, if it does there's a bug
                 assert (last_tidbit_type and last_tidbit_type not in hours)
 
+                time_accuracy = 0
+                # There is apparently an accuracy rating on HLTB. Useful.
+                for cls in tidbit["class"]:
+                    if cls.startswith("time_"):
+                        time_accuracy = int(cls[5:])
+                        break
+
                 # Convert to minutes for consistency with steam
-                hours[last_tidbit_type] = hrsrounded * 60
+                hours[last_tidbit_type] = {"time": hrsrounded * 60, "accuracy": time_accuracy}
             elif ' '.join(tidbit["class"]).find("time_") == -1:
                 last_tidbit_type = tidbit.text
 
     if not hours:
         logging.warn(u"Times not found: {0[name]} ({0[appid]}) ({1:.2f} hrs)".format(game, float(game["playtime_forever"]) / 60))
     else:
-        logging.debug(u"{0[name]} ({0[appid]}): {1}".format(game, ', '.join(sorted([tidbit + ': ' + str(hrs / 60) for tidbit, hrs in hours.items()]))))
+        logging.debug(u"{0[name]} ({0[appid]}): {1}".format(game, ', '.join(sorted(["{0}: {1} ({2})".format(tidbit, hrs["time"] / 60, hrs["accuracy"]) for tidbit, hrs in hours.items()]))))
 
     return hours
 
@@ -230,13 +237,13 @@ if __name__ == "__main__":
         if not hltb_times:
             continue
 
-        try:
-            projected_time = hltb_times.get("Completionist", hltb_times.get("Main + Extra", hltb_times["Main Story"]))
-        except KeyError:
-            logging.warn(u"No upper-main story times found. Using highest: {0[name]} ({0[appid]})".format(game))
-            projected_time = sorted(hltb_times.values(), reverse=True)[0]
+        sorted_times = sorted(hltb_times.items(), key=lambda hrs: (hrs[1]["accuracy"], hrs[1]["time"]), reverse=True)
 
-        backlog_games.append(("{0[appid]:<6}\t{0[name]}".format(game), projected_time / 60))
+        time_type, projected_time = sorted_times[0]
+        if opts.verbose:
+            logging.debug(u"Using {0} time for {1[name]} with {2[accuracy]} accuracy: {3}".format(time_type, game, projected_time, projected_time["time"] / 60))
+
+        backlog_games.append(("{0[appid]:<6}\t{0[name]}".format(game), projected_time["time"] / 60))
 
     print("Writing backlog summary to " + opts.summary_file)
     with open(opts.summary_file, "w") as output:
@@ -254,14 +261,14 @@ if __name__ == "__main__":
             if not hltb_times:
                 continue
 
-            try:
-                projected_time = hltb_times["Main Story"]
-            except KeyError:
-                logging.warn(u"No main story times found. Using highest: {0[name]} ({0[appid]})".format(game))
-                projected_time = sorted(hltb_times.values(), reverse=True)[0]
+            sorted_times = sorted(hltb_times.items(), key=lambda hrs: (hrs[1]["accuracy"], hrs[1]["time"]), reverse=True)
 
-            if projected_time > playtime_forever:
-                revisit_games.append(("{0[appid]:<6}\t{0[name]}".format(game), playtime_forever / 60, projected_time / 60))
+            time_type, projected_time = sorted_times[0]
+            if opts.verbose:
+                logging.debug(u"Using {0} time for {1[name]} with {2[accuracy]} accuracy: {3}".format(time_type, game, projected_time, projected_time["time"] / 60))
+
+            if projected_time["time"] > playtime_forever:
+                revisit_games.append(("{0[appid]:<6}\t{0[name]}".format(game), playtime_forever / 60, projected_time["time"] / 60))
 
     print("Writing revisitation candidates to " + opts.revisit_file)
     with open(opts.revisit_file, "w") as revisitation_output:

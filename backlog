@@ -40,7 +40,7 @@ def fetch_times(game):
         playtimes_request = urllib2.Request(hoursurl, query, httpheaders)
         playtimes = urllib2.urlopen(playtimes_request)
     except urllib2.URLError:
-        logging.error(u"Failed downloading {0[name]}".format(game))
+        logging.error(u"HLTB connection error: {0[name]}".format(game))
         return 0
 
     soup = BeautifulSoup(playtimes.read())
@@ -69,7 +69,9 @@ def fetch_times(game):
                 last_tidbit_type = tidbit.text
 
     if not hours:
-        logging.warn(u"No times for {0[name]} ({0[appid]}) ({1:.2f} hrs)".format(game, float(game["playtime_forever"]) / 60))
+        logging.warn(u"Times not found: {0[name]} ({0[appid]}) ({1:.2f} hrs)".format(game, float(game["playtime_forever"]) / 60))
+    else:
+        logging.debug(u"{0[name]} ({0[appid]}): {1}".format(game, ', '.join(sorted([tidbit + ': ' + str(hrs / 60) for tidbit, hrs in hours.items()]))))
 
     return hours
 
@@ -78,7 +80,7 @@ def fetch_review_times(game):
         req = urllib2.Request(reviewsurl.format(game["appid"]), None, httpheaders)
         times = urllib2.urlopen(req)
     except urllib2.URLerror:
-        logging.error(u"Failed fetching review page for {0[name]}".format(game))
+        logging.error(u"Steam review page connection error: {0[name]}".format(game))
         return 0
 
     soup = BeautifulSoup(times.read())
@@ -165,14 +167,20 @@ if __name__ == "__main__":
     cmdline.add_argument("-r", "--revisit-file", default="revisit.tsv", help="Filename to write revisit suggestions")
     cmdline.add_argument("-e", "--error-file", default="errors.log", help="Filename to write errors and warnings. Set /dev/null to suppress")
     cmdline.add_argument("-i", "--ignore", required=False, default="", help="A comma separated list of app IDs to ignore")
+    cmdline.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
     cmdline.convert_arg_line_to_args = convert_arg_line
     opts = cmdline.parse_args()
 
     ignored_apps = [app.strip() for app in opts.ignore.split(',') if app.strip()]
 
-    logging.basicConfig(filename=opts.error_file, level=logging.WARN, filemode="w")
+    loglevel = logging.WARN
 
-    print("Writing warnings and errors to " + opts.error_file)
+    if opts.verbose:
+        loglevel = logging.DEBUG
+
+    logging.basicConfig(filename=opts.error_file, level=loglevel, filemode="w")
+
+    print("Logging to " + opts.error_file)
 
     steam.api.key.set(opts.key)
 
@@ -223,9 +231,9 @@ if __name__ == "__main__":
             continue
 
         try:
-            projected_time = hltb_times.get("Completionist", hltb_times["Main Story"])
+            projected_time = hltb_times.get("Completionist", hltb_times.get("Main + Extra", hltb_times["Main Story"]))
         except KeyError:
-            logging.warn(u"No good backlog value for {0[name]} ({0[appid]}), using default max".format(game))
+            logging.warn(u"No upper-main story times found. Using highest: {0[name]} ({0[appid]})".format(game))
             projected_time = sorted(hltb_times.values(), reverse=True)[0]
 
         backlog_games.append(("{0[appid]:<6}\t{0[name]}".format(game), projected_time / 60))
@@ -247,9 +255,9 @@ if __name__ == "__main__":
                 continue
 
             try:
-                projected_time = hltb_times.get("Main + Extra", hltb_times["Main Story"])
+                projected_time = hltb_times["Main Story"]
             except KeyError:
-                logging.warn(u"No good backlog value for {0[name]} ({0[appid]}), using default max".format(game))
+                logging.warn(u"No main story times found. Using highest: {0[name]} ({0[appid]})".format(game))
                 projected_time = sorted(hltb_times.values(), reverse=True)[0]
 
             if projected_time > playtime_forever:

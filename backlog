@@ -173,8 +173,9 @@ if __name__ == "__main__":
     cmdline.add_argument("-s", "--summary-file", default="summary.tsv", help="Filename to write the backlog order suggestions")
     cmdline.add_argument("-r", "--revisit-file", default="revisit.tsv", help="Filename to write revisit suggestions")
     cmdline.add_argument("-e", "--error-file", default="errors.log", help="Filename to write errors and warnings. Set /dev/null to suppress")
-    cmdline.add_argument("-i", "--ignore", required=False, default="", help="A comma separated list of app IDs to ignore")
+    cmdline.add_argument("-i", "--ignore", default="", help="A comma separated list of app IDs to ignore")
     cmdline.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
+    cmdline.add_argument("-m", "--revisit-margin", default=25, type=int, help="Margin of error percentage. Used to see if playtimes are sufficiently different to merit revisitation.")
     cmdline.convert_arg_line_to_args = convert_arg_line
     opts = cmdline.parse_args()
 
@@ -220,8 +221,8 @@ if __name__ == "__main__":
     games = processed_games
 
     if filtered_games:
-        logging.warn(u"Filtering {0} games: {1}".format(len(filtered_games),
-            ", ".join([game["name"] + " (" + str(game["appid"]) + ")" for game in filtered_games])))
+        logging.warn(u"Filtering {0} games:\n  {1}".format(len(filtered_games),
+            "\n  ".join([game["name"] + " (" + str(game["appid"]) + ")" for game in sorted(filtered_games, key=operator.itemgetter("name"))])))
 
     print("Finding backlog times")
     backlog_games = []
@@ -240,8 +241,7 @@ if __name__ == "__main__":
         sorted_times = sorted(hltb_times.items(), key=lambda hrs: (hrs[1]["accuracy"], hrs[1]["time"]), reverse=True)
 
         time_type, projected_time = sorted_times[0]
-        if opts.verbose:
-            logging.debug(u"Using {0} time for {1[name]} with {2[accuracy]} accuracy: {3}".format(time_type, game, projected_time, projected_time["time"] / 60))
+        logging.debug(u"Using {0} time for {1[name]} with {2[accuracy]} accuracy: {3}".format(time_type, game, projected_time, projected_time["time"] / 60))
 
         backlog_games.append(("{0[appid]:<6}\t{0[name]}".format(game), projected_time["time"] / 60))
 
@@ -249,7 +249,7 @@ if __name__ == "__main__":
     with open(opts.summary_file, "w") as output:
         write_game_rows(output, sorted(backlog_games, key=operator.itemgetter(1)))
 
-    print("Determining candidates for revisitation")
+    print("Determining candidates for revisitation (" + str(opts.revisit_margin) + "% margin)")
     revisit_games = []
     progress = progress_line(0, len(games))
     for game in games:
@@ -264,11 +264,17 @@ if __name__ == "__main__":
             sorted_times = sorted(hltb_times.items(), key=lambda hrs: (hrs[1]["accuracy"], hrs[1]["time"]), reverse=True)
 
             time_type, projected_time = sorted_times[0]
-            if opts.verbose:
-                logging.debug(u"Using {0} time for {1[name]} with {2[accuracy]} accuracy: {3}".format(time_type, game, projected_time, projected_time["time"] / 60))
+            difference = round(100 - (100.0 / (float(projected_time["time"]) / playtime_forever)), 2)
+            projected_hours = projected_time["time"] / 60
+            playtime_hours = playtime_forever / 60
+
+            logging.debug(u"Using {0} time for {1[name]} with {2[accuracy]} accuracy: {3}".format(time_type, game, projected_time, projected_time["time"] / 60))
 
             if projected_time["time"] > playtime_forever:
-                revisit_games.append(("{0[appid]:<6}\t{0[name]}".format(game), playtime_forever / 60, projected_time["time"] / 60))
+                if difference > opts.revisit_margin:
+                    revisit_games.append(("{0[appid]:<6}\t{0[name]}".format(game), playtime_hours, projected_hours))
+                else:
+                    logging.debug("Suppressing entry of {0[name]}: {1:.2f} / {2:.2f} difference = {3:.2f}%".format(game, playtime_hours, projected_hours, difference))
 
     print("Writing revisitation candidates to " + opts.revisit_file)
     with open(opts.revisit_file, "w") as revisitation_output:

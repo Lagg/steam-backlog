@@ -179,7 +179,11 @@ if __name__ == "__main__":
     cmdline.convert_arg_line_to_args = convert_arg_line
     opts = cmdline.parse_args()
 
-    ignored_apps = [app.strip() for app in opts.ignore.split(',') if app.strip()]
+    try:
+        ignored_apps = [int(app.strip()) for app in opts.ignore.split(',') if app.strip()]
+    except ValueError as e:
+        logging.error("Bad app ID given in ignore list: " + str(e))
+        raise SystemExit
 
     loglevel = logging.WARN
 
@@ -197,12 +201,12 @@ if __name__ == "__main__":
     else:
         profile_id64 = steam.user.vanity_url(opts.user).id64
 
-    games = sorted(steam.api.interface("IPlayerService").GetOwnedGames(steamid=profile_id64,
-                   include_appinfo=1, include_played_free_games=1)["response"]["games"],
-                   key=operator.itemgetter("playtime_forever"))
+    owned_games = sorted(steam.api.interface("IPlayerService").GetOwnedGames(steamid=profile_id64,
+                         include_appinfo=1, include_played_free_games=1)["response"]["games"],
+                         key=operator.itemgetter("playtime_forever"))
 
-    total_minutes = sum(map(operator.itemgetter("playtime_forever"), games))
-    my_average_minutes = round(float(total_minutes) / len(games), 2)
+    total_minutes = sum(map(operator.itemgetter("playtime_forever"), owned_games))
+    my_average_minutes = round(float(total_minutes) / len(owned_games), 2)
 
     print("Our average playtime: {0:.2f} hrs".format(my_average_minutes / 60))
 
@@ -210,24 +214,31 @@ if __name__ == "__main__":
     # Not using builtin here so that a bit of explicit logging can be done about
     # what's getting filtered
     filtered_games = []
-    processed_games = []
+    unplayed_games = []
+    played_games = []
 
-    for game in games:
-        if str(game["appid"]) in ignored_apps:
+    for game in owned_games:
+        if game["appid"] in ignored_apps:
             filtered_games.append(game)
         else:
-            processed_games.append(game)
+            if game["playtime_forever"] > 0:
+                played_games.append(game)
+            else:
+                unplayed_games.append(game)
 
-    games = processed_games
+    bad_appids = set(ignored_apps) - set(map(operator.itemgetter("appid"), filtered_games))
 
     if filtered_games:
         logging.warn(u"Filtering {0} games:\n  {1}".format(len(filtered_games),
             "\n  ".join([game["name"] + " (" + str(game["appid"]) + ")" for game in sorted(filtered_games, key=operator.itemgetter("name"))])))
 
+    if bad_appids:
+        logging.warn(u"{0} bad app IDs: {1}".format(len(bad_appids), ', '.join([str(app) for app in bad_appids])))
+
     print("Finding backlog times")
     backlog_games = []
-    progress = progress_line(0, len(games))
-    for game in games:
+    progress = progress_line(0, len(unplayed_games))
+    for game in unplayed_games:
         progress.inc()
 
         if game["playtime_forever"] > 0:
@@ -251,8 +262,8 @@ if __name__ == "__main__":
 
     print("Determining candidates for revisitation (" + str(opts.revisit_margin) + "% margin)")
     revisit_games = []
-    progress = progress_line(0, len(games))
-    for game in games:
+    progress = progress_line(0, len(played_games))
+    for game in played_games:
         progress.inc()
         playtime_forever = float(game["playtime_forever"])
         if "playtime_2weeks" not in game and playtime_forever > 0 and playtime_forever < my_average_minutes:

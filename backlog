@@ -33,7 +33,8 @@ httpheaders = {
 
 def fetch_times(game):
     """ I feel like a bit of an asshole for doing this, hence the guilty header. Sorry :( """
-    query = urlencode({"queryString": game["name"].encode("utf-8")})
+    # The replace calls are to strip trademark symbols.
+    query = urlencode({"queryString": game["name"].replace(u"\xae", '').replace(u"\u2122", '').encode("utf-8")})
     hours = {}
 
     try:
@@ -254,7 +255,7 @@ if __name__ == "__main__":
         time_type, projected_time = sorted_times[0]
         logging.debug(u"Using {0} time for {1[name]} with {2[accuracy]} accuracy: {3}".format(time_type, game, projected_time, projected_time["time"] / 60))
 
-        backlog_games.append(("{0[appid]:<6}\t{0[name]}".format(game), projected_time["time"] / 60))
+        backlog_games.append((u"{0[appid]:<6}\t{0[name]}".format(game), projected_time["time"] / 60))
 
     print("Writing backlog summary to " + opts.summary_file)
     with open(opts.summary_file, "w") as output:
@@ -283,9 +284,9 @@ if __name__ == "__main__":
 
             if projected_time["time"] > playtime_forever:
                 if difference > opts.revisit_margin:
-                    revisit_games.append(("{0[appid]:<6}\t{0[name]}".format(game), playtime_hours, projected_hours))
+                    revisit_games.append((u"{0[appid]:<6}\t{0[name]}".format(game), playtime_hours, projected_hours))
                 else:
-                    logging.debug("Suppressing entry of {0[name]}: {1:.2f} / {2:.2f} difference = {3:.2f}%".format(game, playtime_hours, projected_hours, difference))
+                    logging.debug(u"Suppressing entry of {0[name]}: {1:.2f} / {2:.2f} difference = {3:.2f}%".format(game, playtime_hours, projected_hours, difference))
 
     print("Writing revisitation candidates to " + opts.revisit_file)
     with open(opts.revisit_file, "w") as revisitation_output:

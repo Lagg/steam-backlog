@@ -31,21 +31,46 @@ httpheaders = {
         "X-Fetched-By": "Lagg's backlog helper. Forgive the scraping."
         }
 
-def fetch_times(game):
+def _fetch_hltb_soup(game):
     """ I feel like a bit of an asshole for doing this, hence the guilty header. Sorry :( """
-    # The replace calls are to strip trademark symbols.
-    query = urlencode({"queryString": game["name"].replace(u"\xae", '').replace(u"\u2122", '').encode("utf-8")})
-    hours = {}
+    query = urlencode({"queryString": game.encode("utf-8")})
 
     try:
         playtimes_request = urllib2.Request(hoursurl, query, httpheaders)
         playtimes = urllib2.urlopen(playtimes_request)
+        return BeautifulSoup(playtimes.read())
     except urllib2.URLError:
         logging.error(u"HLTB connection error: {0[name]}".format(game))
-        return 0
+        return None
 
-    soup = BeautifulSoup(playtimes.read())
-    matches = soup.findAll(class_="gamelist_details")
+def fetch_times(game, max_retries=3):
+    # The replace calls are to strip trademark symbols.
+    querystring = game["name"].replace(u"\xae", '').replace(u"\u2122", '')
+
+    matches = []
+    hours = {}
+    retries = 0
+
+    while len(matches) == 0 and retries < max_retries:
+        soup = _fetch_hltb_soup(querystring)
+
+        if not soup:
+            break
+
+        matches = soup.findAll(class_="gamelist_details")
+
+        if len(matches) > 0:
+            if retries > 0:
+                logging.warn(u"{0[name]} ({0[appid]}) was found but only after shortening name to {1}".format(game, querystring))
+            break
+        else:
+            retries += 1
+            # This is what I call ^W simulation
+            splitqs = querystring.rsplit(' ', 1)
+            if len(splitqs) < 2:
+                break
+
+            querystring = splitqs[0].strip(':')
 
     if len(matches) > 0:
         match = matches[0]
@@ -177,6 +202,7 @@ if __name__ == "__main__":
     cmdline.add_argument("-i", "--ignore", default="", help="A comma separated list of app IDs to ignore")
     cmdline.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
     cmdline.add_argument("-m", "--revisit-margin", default=25, type=int, help="Margin of error percentage. Used to see if playtimes are sufficiently different to merit revisitation.")
+    cmdline.add_argument("-n", "--name-search-retries", default=3, type=int, help="How many times to retry a search for a game name using shorter strings or a different permutation")
     cmdline.convert_arg_line_to_args = convert_arg_line
     opts = cmdline.parse_args()
 
@@ -245,7 +271,7 @@ if __name__ == "__main__":
         if game["playtime_forever"] > 0:
             continue
 
-        hltb_times = fetch_times(game)
+        hltb_times = fetch_times(game, max_retries=opts.name_search_retries)
 
         if not hltb_times:
             continue
@@ -268,7 +294,7 @@ if __name__ == "__main__":
         progress.inc()
         playtime_forever = float(game["playtime_forever"])
         if "playtime_2weeks" not in game and playtime_forever > 0 and playtime_forever < my_average_minutes:
-            hltb_times = fetch_times(game)
+            hltb_times = fetch_times(game, max_retries=opts.name_search_retries)
 
             if not hltb_times:
                 continue

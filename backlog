@@ -62,6 +62,7 @@ def fetch_times(game, max_retries=3):
         if len(matches) > 0:
             if retries > 0:
                 logging.warn(u"{0[name]} ({0[appid]}) was found but only after shortening name to {1}".format(game, querystring))
+                game["name"] += " (?)"
             break
         else:
             retries += 1
@@ -202,7 +203,7 @@ if __name__ == "__main__":
     cmdline.add_argument("-i", "--ignore", default="", help="A comma separated list of app IDs to ignore")
     cmdline.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
     cmdline.add_argument("-m", "--revisit-margin", default=25, type=int, help="Margin of error percentage. Used to see if playtimes are sufficiently different to merit revisitation.")
-    cmdline.add_argument("-n", "--name-search-retries", default=3, type=int, help="How many times to retry a search for a game name using shorter strings or a different permutation")
+    cmdline.add_argument("-n", "--name-search-retries", default=3, type=int, help="How many times to retry a search for a game name using shorter strings or a different permutation. Such games are indicated by a '(?)' next to the name.")
     cmdline.convert_arg_line_to_args = convert_arg_line
     opts = cmdline.parse_args()
 

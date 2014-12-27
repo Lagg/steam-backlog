@@ -12,6 +12,7 @@ import operator
 import argparse
 import logging
 import sys
+import unicodedata
 
 import steam
 from bs4 import BeautifulSoup
@@ -31,6 +32,36 @@ httpheaders = {
         "X-Fetched-By": "Lagg's backlog helper. Forgive the scraping."
         }
 
+charnameexp = re.compile(r"LATIN (SMALL|CAPITAL) LETTER ([A-Za-z0-9]+) ?")
+def _clean_game_name(name):
+    """ Cleans up the given name so that it's more likely to show up in search results """
+    # The replace calls are to strip trademark symbols.
+    cleanedname = name.replace(u"\xae", '').replace(u"\u2122", '')
+
+    # What is about to occur here may be frightening. It is. But not moreso than
+    # writing one's own hardcoded translation tables *shiver*
+    chars = list(cleanedname)
+    for i in range(len(chars)):
+        c = chars[i]
+
+        try:
+            asciichar = c.encode("ascii")
+        except UnicodeEncodeError:
+            charname = unicodedata.name(c)
+            matches = charnameexp.search(charname)
+
+            if matches:
+                newchar = matches.group(2)
+                if matches.group(1) == "SMALL":
+                    newchar = newchar.lower()
+                chars[i] = newchar
+            else:
+                logging.debug(u"Non-ascii char {0} ({1}) couldn't be converted".format(c, charname))
+
+    cleanedname = ''.join(chars)
+
+    return cleanedname
+
 def _fetch_hltb_soup(game):
     """ I feel like a bit of an asshole for doing this, hence the guilty header. Sorry :( """
     query = urlencode({"queryString": game.encode("utf-8")})
@@ -44,8 +75,7 @@ def _fetch_hltb_soup(game):
         return None
 
 def fetch_times(game, max_retries=3):
-    # The replace calls are to strip trademark symbols.
-    querystring = game["name"].replace(u"\xae", '').replace(u"\u2122", '')
+    querystring = _clean_game_name(game["name"])
 
     matches = []
     hours = {}

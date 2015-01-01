@@ -73,6 +73,22 @@ def convert_arg_line(line):
 
     return map(str.strip, args)
 
+def get_likeliest_time(game, retries=3):
+    try:
+        hltb_times = steamhltb.hltb(game, retries=retries).fetch()
+    except steamhltb.TimesNotFound:
+        return None
+
+    if hltb_times.get("partial_match"):
+        game["name"] += " (?)"
+
+    sorted_times = sorted(hltb_times["hours"].items(), key=lambda hrs: (hrs[1]["accuracy"], hrs[1]["time"]), reverse=True)
+
+    time_type, projected_time = sorted_times[0]
+    logging.debug(u"Using {0} time for {1[name]} with {2[accuracy]} accuracy: {3}".format(time_type, game, projected_time, projected_time["time"] / 60))
+
+    return projected_time
+
 if __name__ == "__main__":
     cmdline = argparse.ArgumentParser(description="Write out suggestions for your backlog and potential games to revisit", fromfile_prefix_chars='@')
     cmdline.add_argument("-k", "--key", help="Your API key", required=True)
@@ -145,20 +161,10 @@ if __name__ == "__main__":
         if game["playtime_forever"] > 0:
             continue
 
-        try:
-            hltb_times = steamhltb.hltb(game, retries=opts.name_search_retries).fetch()
-        except steamhltb.TimesNotFound:
-            continue
+        projected_time = get_likeliest_time(game, retries=opts.name_search_retries)
 
-        if hltb_times.get("partial_match"):
-            game["name"] += " (?)"
-
-        sorted_times = sorted(hltb_times["hours"].items(), key=lambda hrs: (hrs[1]["accuracy"], hrs[1]["time"]), reverse=True)
-
-        time_type, projected_time = sorted_times[0]
-        logging.debug(u"Using {0} time for {1[name]} with {2[accuracy]} accuracy: {3}".format(time_type, game, projected_time, projected_time["time"] / 60))
-
-        backlog_games.append((u"{0[appid]:<6}\t{0[name]}".format(game), projected_time["time"] / 60))
+        if projected_time:
+            backlog_games.append((u"{0[appid]:<6}\t{0[name]}".format(game), projected_time["time"] / 60))
 
     print("Writing backlog summary to " + opts.summary_file)
     with open(opts.summary_file, "w") as output:
@@ -171,22 +177,14 @@ if __name__ == "__main__":
         progress.inc()
         playtime_forever = float(game["playtime_forever"])
         if "playtime_2weeks" not in game and playtime_forever > 0 and playtime_forever < my_average_minutes:
-            try:
-                hltb_times = steamhltb.hltb(game, retries=opts.name_search_retries).fetch()
-            except steamhltb.TimesNotFound:
+            projected_time = get_likeliest_time(game, retries=opts.name_search_retries)
+
+            if not projected_time:
                 continue
 
-            if hltb_times.get("partial_match"):
-                game["name"] += " (?)"
-
-            sorted_times = sorted(hltb_times["hours"].items(), key=lambda hrs: (hrs[1]["accuracy"], hrs[1]["time"]), reverse=True)
-
-            time_type, projected_time = sorted_times[0]
             difference = round(100 - (100.0 / (float(projected_time["time"]) / playtime_forever)), 2)
             projected_hours = projected_time["time"] / 60
             playtime_hours = playtime_forever / 60
-
-            logging.debug(u"Using {0} time for {1[name]} with {2[accuracy]} accuracy: {3}".format(time_type, game, projected_time, projected_time["time"] / 60))
 
             if projected_time["time"] > playtime_forever:
                 if difference > opts.revisit_margin:

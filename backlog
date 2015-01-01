@@ -5,171 +5,14 @@ Copyright (c) 2014+, Anthony Garcia <anthony@lagg.me>
 Distributed under the ISC License. See README
 """
 
-import urllib2
-from urllib import urlencode
-import re
 import operator
 import argparse
 import logging
 import sys
-import unicodedata
 
 import steam
-from bs4 import BeautifulSoup
 
-fractionalchars = {u'\xbc': 0.25,
-                   u'\xbd': 0.50,
-                   u'\xbe': 0.75
-                  }
-
-hoursurl = "http://www.howlongtobeat.com/search_main.php?t=games&page=1&sorthead=popular&sortd=Normal%20Order&plat=&detail=0"
-hoursexp = re.compile(r"([0-9]+)([^0-9]*) Hours")
-reviewsurl = "http://steamcommunity.com/app/{0}/reviews/?browsefilter=toprated&p=1"
-reviewshoursexp = re.compile(r"(\d+\.\d+) hrs on record")
-
-httpheaders = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 6.1; WOW64; rv:33.0) Gecko/20100101 Firefox/33.0",
-        "X-Fetched-By": "Lagg's backlog helper. Forgive the scraping."
-        }
-
-charnameexp = re.compile(r"LATIN (SMALL|CAPITAL) LETTER ([A-Za-z0-9]+) ?")
-def _clean_game_name(name):
-    """ Cleans up the given name so that it's more likely to show up in search results """
-    # The replace calls are to strip trademark symbols.
-    cleanedname = name.replace(u"\xae", '').replace(u"\u2122", '')
-
-    # What is about to occur here may be frightening. It is. But not moreso than
-    # writing one's own hardcoded translation tables *shiver*
-    chars = list(cleanedname)
-    for i in range(len(chars)):
-        c = chars[i]
-
-        try:
-            asciichar = c.encode("ascii")
-        except UnicodeEncodeError:
-            charname = unicodedata.name(c)
-            matches = charnameexp.search(charname)
-
-            if matches:
-                newchar = matches.group(2)
-                if matches.group(1) == "SMALL":
-                    newchar = newchar.lower()
-                chars[i] = newchar
-            else:
-                logging.debug(u"Non-ascii char {0} ({1}) couldn't be converted".format(c, charname))
-
-    cleanedname = ''.join(chars)
-
-    return cleanedname
-
-def _fetch_hltb_soup(game):
-    """ I feel like a bit of an asshole for doing this, hence the guilty header. Sorry :( """
-    query = urlencode({"queryString": game.encode("utf-8")})
-
-    try:
-        playtimes_request = urllib2.Request(hoursurl, query, httpheaders)
-        playtimes = urllib2.urlopen(playtimes_request)
-        return BeautifulSoup(playtimes.read())
-    except urllib2.URLError:
-        logging.error(u"HLTB connection error: {0[name]}".format(game))
-        return None
-
-def fetch_times(game, max_retries=3):
-    querystring = _clean_game_name(game["name"])
-
-    matches = []
-    hours = {}
-    retries = 0
-
-    while len(matches) == 0 and retries < max_retries:
-        soup = _fetch_hltb_soup(querystring)
-
-        if not soup:
-            break
-
-        matches = soup.findAll(class_="gamelist_details")
-
-        if len(matches) > 0:
-            if retries > 0:
-                found_name_href = matches[0].select("h3 a")
-
-                if found_name_href:
-                    found_name = found_name_href[0].text
-                else:
-                    found_name = '?'
-
-                logging.warn(u"{0[name]} ({0[appid]}) was found but only after shortening name to '{1}' giving '{2}'".format(game, querystring, found_name))
-                game["name"] += " (?)"
-            break
-        else:
-            retries += 1
-            # This is what I call ^W simulation
-            splitqs = querystring.rsplit(' ', 1)
-            if len(splitqs) < 2:
-                break
-
-            querystring = splitqs[0].strip(':')
-
-    if len(matches) > 0:
-        match = matches[0]
-        tidbits = match.findAll("div", class_="gamelist_tidbit")
-        last_tidbit_type = None
-
-        for tidbit in tidbits:
-            tidbit_match = hoursexp.search(tidbit.text)
-            if tidbit_match:
-                hrsrounded = float(tidbit_match.group(1))
-                fractional = tidbit_match.group(2)
-
-                if fractional:
-                    hrsrounded += fractionalchars.get(fractional, 0)
-
-                # Should never already exist, if it does there's a bug
-                assert (last_tidbit_type and last_tidbit_type not in hours)
-
-                time_accuracy = 0
-                # There is apparently an accuracy rating on HLTB. Useful.
-                for cls in tidbit["class"]:
-                    if cls.startswith("time_"):
-                        time_accuracy = int(cls[5:])
-                        break
-
-                # Convert to minutes for consistency with steam
-                hours[last_tidbit_type] = {"time": hrsrounded * 60, "accuracy": time_accuracy}
-            elif ' '.join(tidbit["class"]).find("time_") == -1:
-                last_tidbit_type = tidbit.text
-
-    if not hours:
-        logging.warn(u"Times not found: {0[name]} ({0[appid]}) ({1:.2f} hrs)".format(game, float(game["playtime_forever"]) / 60))
-    else:
-        logging.debug(u"{0[name]} ({0[appid]}): {1}".format(game, ', '.join(sorted(["{0}: {1} ({2})".format(tidbit, hrs["time"] / 60, hrs["accuracy"]) for tidbit, hrs in hours.items()]))))
-
-    return hours
-
-def fetch_review_times(game):
-    try:
-        req = urllib2.Request(reviewsurl.format(game["appid"]), None, httpheaders)
-        times = urllib2.urlopen(req)
-    except urllib2.URLerror:
-        logging.error(u"Steam review page connection error: {0[name]}".format(game))
-        return 0
-
-    soup = BeautifulSoup(times.read())
-    cards = soup.findAll(class_="apphub_Card")
-    hours = []
-
-    for card in cards:
-        hr = card.find(class_="hours")
-
-        if not hr:
-            continue
-
-        hrmatch = reviewshoursexp.search(hr.text)
-
-        if hrmatch:
-            hours.append(float(hrmatch.group(1)))
-
-    return sum(hours) / len(hours)
+import steamhltb
 
 class progress_line(object):
     """ Could be cleaner, I know """
@@ -261,14 +104,7 @@ if __name__ == "__main__":
 
     steam.api.key.set(opts.key)
 
-    if opts.user.isdigit():
-        profile_id64 = opts.user
-    else:
-        profile_id64 = steam.user.vanity_url(opts.user).id64
-
-    owned_games = sorted(steam.api.interface("IPlayerService").GetOwnedGames(steamid=profile_id64,
-                         include_appinfo=1, include_played_free_games=1)["response"]["games"],
-                         key=operator.itemgetter("playtime_forever"))
+    owned_games = steamhltb.user_hours(opts.user)
 
     total_minutes = sum(map(operator.itemgetter("playtime_forever"), owned_games))
     my_average_minutes = round(float(total_minutes) / len(owned_games), 2)
@@ -309,12 +145,15 @@ if __name__ == "__main__":
         if game["playtime_forever"] > 0:
             continue
 
-        hltb_times = fetch_times(game, max_retries=opts.name_search_retries)
-
-        if not hltb_times:
+        try:
+            hltb_times = steamhltb.hltb(game, retries=opts.name_search_retries).fetch()
+        except steamhltb.TimesNotFound:
             continue
 
-        sorted_times = sorted(hltb_times.items(), key=lambda hrs: (hrs[1]["accuracy"], hrs[1]["time"]), reverse=True)
+        if hltb_times.get("partial_match"):
+            game["name"] += " (?)"
+
+        sorted_times = sorted(hltb_times["hours"].items(), key=lambda hrs: (hrs[1]["accuracy"], hrs[1]["time"]), reverse=True)
 
         time_type, projected_time = sorted_times[0]
         logging.debug(u"Using {0} time for {1[name]} with {2[accuracy]} accuracy: {3}".format(time_type, game, projected_time, projected_time["time"] / 60))
@@ -332,12 +171,15 @@ if __name__ == "__main__":
         progress.inc()
         playtime_forever = float(game["playtime_forever"])
         if "playtime_2weeks" not in game and playtime_forever > 0 and playtime_forever < my_average_minutes:
-            hltb_times = fetch_times(game, max_retries=opts.name_search_retries)
-
-            if not hltb_times:
+            try:
+                hltb_times = steamhltb.hltb(game, retries=opts.name_search_retries).fetch()
+            except steamhltb.TimesNotFound:
                 continue
 
-            sorted_times = sorted(hltb_times.items(), key=lambda hrs: (hrs[1]["accuracy"], hrs[1]["time"]), reverse=True)
+            if hltb_times.get("partial_match"):
+                game["name"] += " (?)"
+
+            sorted_times = sorted(hltb_times["hours"].items(), key=lambda hrs: (hrs[1]["accuracy"], hrs[1]["time"]), reverse=True)
 
             time_type, projected_time = sorted_times[0]
             difference = round(100 - (100.0 / (float(projected_time["time"]) / playtime_forever)), 2)

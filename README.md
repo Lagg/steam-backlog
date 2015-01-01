@@ -4,6 +4,13 @@ This is a partial prototype I wrote as a tool to help me generate an outline of 
 consider revisiting. Currently scrapes times from howlongtobeat.com, which I feel terrible about but don't really have any other choice at the moment.
 Will probably reimplement when time permits as something more formal. Does the job for now though and might for someone else too.
 
+## steamhltb ##
+
+Included and used by backlagg is an early module wrote to make it easy for people to reuse the code that pulls times from
+both Steam and HLTB and generates combined summaries. The API (as in the symbols and conventions, not Steam) is still too
+volatile to make a pypi-able setuptools package but it'll likely remain as a single file so you should just be able to drop
+it into your import path. See the docstrings for further documentation.
+
 ## Interpreting the output ##
 
 Though the column layout is subject to change, the output format for suggested games to play and revisit are simple tab-separated values. The following is a

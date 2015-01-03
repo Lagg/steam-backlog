@@ -9,6 +9,7 @@ import re
 import operator
 # TODO: Use proper logger creator
 import logging
+import unicodedata
 
 import steam
 from bs4 import BeautifulSoup

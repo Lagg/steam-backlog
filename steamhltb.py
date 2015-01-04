@@ -68,7 +68,7 @@ class scraper(object):
                 asciichar = c.encode("ascii")
             except UnicodeEncodeError:
                 charname = unicodedata.name(c)
-                matches = _char_name_exp.search(charname)
+                matches = self._char_name_exp.search(charname)
 
                 if matches:
                     newchar = matches.group(2)

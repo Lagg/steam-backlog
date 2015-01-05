@@ -7,7 +7,6 @@ import urllib2
 from urllib import urlencode
 import re
 import operator
-# TODO: Use proper logger creator
 import logging
 import unicodedata
 

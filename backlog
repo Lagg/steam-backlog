@@ -51,16 +51,36 @@ def longest_elem(iterable):
 
 def write_game_rows(stream, rows):
     """
-    rows is a list of tuples, the first element
-    of the tuple should be the initial game name string
-    and the rest are hours
+    Writes fancy and nicely formatted TSVs to a given output stream
+    rows: a list of tuples that can be converted to strings
     """
-    longest_name = str(longest_elem(map(operator.itemgetter(0), rows)) + 2)
+    longest_items = [0] * (sorted(map(len, rows), reverse=True)[0])
+
     for row in rows:
-        name = row[0]
-        hrs = row[1:]
-        line = (u"{0:<" + longest_name + "}\t").format(name) + '\t'.join(["{0:0.2f}".format(hr) for hr in hrs]) + '\n'
-        stream.write(line.encode("utf-8"))
+        for i in range(len(row)):
+            item = row[i]
+
+            try:
+                itemlen = len(item)
+            except TypeError:
+                itemlen = len(str(item))
+
+            if itemlen > longest_items[i]:
+                longest_items[i] = itemlen
+
+    for row in rows:
+        formatted_items = []
+
+        for i in range(len(row)):
+            item = row[i]
+
+            if isinstance(item, float):
+                item = "{0:0.2f}".format(item)
+
+            formatted_items.append((u"{0:<" + str(longest_items[i]) + "}").format(item))
+
+        if formatted_items:
+            stream.write(('\t'.join(formatted_items) + '\n').encode("utf-8"))
 
 def convert_arg_line(line):
     tok = line.find('=')
@@ -173,11 +193,11 @@ if __name__ == "__main__":
         projected_time = get_likeliest_time(game, retries=opts.name_search_retries, review_pages=opts.review_pages)
 
         if projected_time:
-            backlog_games.append((u"{0[appid]:<6}\t{0[name]}".format(game), projected_time / 60))
+            backlog_games.append((game["appid"], game["name"], projected_time / 60))
 
     print("Writing backlog summary to " + opts.summary_file)
     with open(opts.summary_file, "w") as output:
-        write_game_rows(output, sorted(backlog_games, key=operator.itemgetter(1)))
+        write_game_rows(output, [("App ID", "Name", "Projected hours")] + sorted(backlog_games, key=operator.itemgetter(2)))
 
     print("Determining candidates for revisitation (" + str(opts.revisit_margin) + "% margin)")
     revisit_games = []
@@ -197,10 +217,10 @@ if __name__ == "__main__":
 
             if projected_time > playtime_forever:
                 if difference > opts.revisit_margin:
-                    revisit_games.append((u"{0[appid]:<6}\t{0[name]}".format(game), playtime_hours, projected_hours))
+                    revisit_games.append((game["appid"], game["name"], playtime_hours, projected_hours))
                 else:
                     logging.debug(u"Suppressing entry of {0[name]}: {1:.2f} / {2:.2f} difference = {3:.2f}%".format(game, playtime_hours, projected_hours, difference))
 
     print("Writing revisitation candidates to " + opts.revisit_file)
     with open(opts.revisit_file, "w") as revisitation_output:
-        write_game_rows(revisitation_output, sorted(revisit_games, key=operator.itemgetter(2)))
+        write_game_rows(revisitation_output, [("App ID", "Name", "Your hours", "Projected hours")] + sorted(revisit_games, key=operator.itemgetter(3)))

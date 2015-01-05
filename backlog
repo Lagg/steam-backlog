@@ -73,7 +73,7 @@ def convert_arg_line(line):
 
     return map(str.strip, args)
 
-def get_likeliest_time(game, retries=3):
+def get_likeliest_time(game, retries=3, review_pages=1):
     projected_time = None
 
     try:
@@ -89,7 +89,7 @@ def get_likeliest_time(game, retries=3):
         logging.debug(u"HLTB: Using {0} time for {1[name]} with {2[accuracy]} accuracy: {3}".format(time_type, game, timeinfo, projected_time / 60))
     except steamhltb.TimesNotFound:
         try:
-            steam_times = steamhltb.review_times(game).fetch()
+            steam_times = steamhltb.review_times(game, pages=review_pages).fetch()
             projected_time = steam_times["average"]
             logging.debug(u"Steam: Using steam time for {0[name]}: {1:0.2f}".format(game, projected_time / 60))
         except steamhltb.TimesNotFound:
@@ -108,6 +108,7 @@ if __name__ == "__main__":
     cmdline.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
     cmdline.add_argument("-m", "--revisit-margin", default=25, type=int, help="Margin of error percentage. Used to see if playtimes are sufficiently different to merit revisitation.")
     cmdline.add_argument("-n", "--name-search-retries", default=0, type=int, help="How many times to retry a search for a game name using shorter strings or a different permutation. Such games are indicated by a '(?)' next to the name.")
+    cmdline.add_argument("-p", "--review-pages", default=1, type=int, help="How many pages of steam reviews to fetch when it's used. More pages mean more accurate averages but also a higher chance of being throttled.")
     cmdline.convert_arg_line_to_args = convert_arg_line
     opts = cmdline.parse_args()
 
@@ -169,7 +170,7 @@ if __name__ == "__main__":
         if game["playtime_forever"] > 0:
             continue
 
-        projected_time = get_likeliest_time(game, retries=opts.name_search_retries)
+        projected_time = get_likeliest_time(game, retries=opts.name_search_retries, review_pages=opts.review_pages)
 
         if projected_time:
             backlog_games.append((u"{0[appid]:<6}\t{0[name]}".format(game), projected_time / 60))
@@ -185,7 +186,7 @@ if __name__ == "__main__":
         progress.inc()
         playtime_forever = float(game["playtime_forever"])
         if "playtime_2weeks" not in game and playtime_forever > 0 and playtime_forever < my_average_minutes:
-            projected_time = get_likeliest_time(game, retries=opts.name_search_retries)
+            projected_time = get_likeliest_time(game, retries=opts.name_search_retries, review_pages=opts.review_pages)
 
             if not projected_time:
                 continue

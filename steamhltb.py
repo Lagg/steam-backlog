@@ -213,45 +213,63 @@ class review_times(scraper):
 
         self._game = game
         self._hours = {}
-        self._pages = pages
+        self._pages = max(1, pages)
 
-    def fetch(self):
-        self._hours = {}
+    def _fetch_soup(self, last_soup=None):
+        """ Fetches the next page of  soup from the steam reviews.
+        last_soup: The previous soup returned, will be used to fetch the next page """
+
+        url_suffix = ''
+
+        if last_soup:
+            pageform = last_soup.find("form")
+            nextpage_params = []
+
+            for tag in pageform.findAll(attrs={"type": "hidden"}):
+                nextpage_params.append(urlencode({tag["name"]: tag["value"]}))
+
+            if nextpage_params:
+                url_suffix = "&" + "&".join(nextpage_params)
 
         try:
-            req = urllib2.Request(self._reviews_url.format(self._game["appid"]), None, self._http_headers)
+            url = self._reviews_url.format(self._game["appid"]) + url_suffix
+            logger.debug("Fetching steam review page: " + url)
+            req = urllib2.Request(url, None, self._http_headers)
             times = urllib2.urlopen(req)
         except urllib2.URLError:
             logger.error(u"Steam review page connection error: {0[name]}".format(self._game))
             raise SteamTimesNotFound(self._game)
 
         soup = BeautifulSoup(times.read())
-        cards = soup.findAll(class_="apphub_Card")
+
+        return soup
+
+    def fetch(self):
+        self._hours = {}
         hours = []
+        soup = None
 
-        # TODO: Make this do something to emulate the infinite scroll
-        pageform = soup.find("form")
-        nextpage_params = []
-        for tag in pageform.findAll(attrs={"type": "hidden"}):
-            nextpage_params.append(urlencode({tag["name"]: tag["value"]}))
-        nextpage_params = '?' + "&".join(nextpage_params)
+        for i in range(self._pages):
+            soup = self._fetch_soup(last_soup=soup)
 
-        for card in cards:
-            hr = card.find(class_="hours")
-            title = card.find(class_="title")
+            cards = soup.findAll(class_="apphub_Card")
 
-            if not hr or not title:
-                logger.warn(u"Couldn't find hour/title set for {0[name]}. Layout may have changed.".format(self._game))
-                raise SteamTimesNotFound(self._game)
+            for card in cards:
+                hr = card.find(class_="hours")
+                title = card.find(class_="title")
 
-            hrmatch = self._hours_exp.search(hr.text)
-            titletext = title.text.strip()
+                if not hr or not title:
+                    logger.warn(u"Couldn't find hour/title set for {0[name]}. Layout may have changed.".format(self._game))
+                    raise SteamTimesNotFound(self._game)
 
-            # Check for only recommended since those are
-            # usually the ones with the most accurate hours for
-            # obvious reasons
-            if hrmatch and titletext == "Recommended":
-                hours.append(float(hrmatch.group(1)) * 60)
+                hrmatch = self._hours_exp.search(hr.text)
+                titletext = title.text.strip()
+
+                # Check for only recommended since those are
+                # usually the ones with the most accurate hours for
+                # obvious reasons
+                if hrmatch and titletext == "Recommended":
+                    hours.append(float(hrmatch.group(1)) * 60)
 
         self._hours = {"hours": hours, "average": round(float(sum(hours)) / len(hours), 2)}
 

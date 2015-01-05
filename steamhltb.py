@@ -102,7 +102,7 @@ class hltb(scraper):
         retries: number of times to shorten and retry a name search
         """
         self._game = game
-        self._retries = retries
+        self._retries = max(1, retries)
 
     def _fetch_soup(self, name):
         """ I feel like a bit of an asshole for doing this, hence the guilty header. Sorry :( """
@@ -251,9 +251,9 @@ class review_times(scraper):
             # usually the ones with the most accurate hours for
             # obvious reasons
             if hrmatch and titletext == "Recommended":
-                hours.append(float(hrmatch.group(1)))
+                hours.append(float(hrmatch.group(1)) * 60)
 
-        self._hours = {"hours": hours, "average": sum(hours) / len(hours)}
+        self._hours = {"hours": hours, "average": round(float(sum(hours)) / len(hours), 2)}
 
         return self._hours
 

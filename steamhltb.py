@@ -182,18 +182,20 @@ class hltb(scraper):
                     last_tidbit_type = tidbit.text
 
         if not result["hours"]:
-            logger.warn(u"Times not found: {0[name]} ({0[appid]}) ({1:.2f} hrs)".format(self._game, float(self._game["playtime_forever"]) / 60))
+            logger.warn(u"HLTB: {0[name]} ({0[appid]}): No times found".format(self._game))
             raise HLTBTimesNotFound(self._game)
         else:
-            logger.debug(u"{0[name]} ({0[appid]}): {1}".format(self._game, ', '.join(sorted(["{0}: {1} ({2})".format(tidbit, hrs["time"] / 60, hrs["accuracy"]) for tidbit, hrs in result["hours"].items()]))))
+            logger.debug(u"HLTB: {0[name]} ({0[appid]}): {1}".format(self._game,
+                ', '.join(["{0}: {1} ({2})".format(tidbit, hrs["time"] / 60, hrs["accuracy"])
+                           for tidbit, hrs in sorted(result["hours"].items(),
+                           key=lambda x: (x[1]["accuracy"], x[1]["time"]), reverse=True)])))
 
         return result
 
 
 class review_times(scraper):
     """ Experimental thingy that can be used as a fallback
-    if hltb doesn't work. Not used in backlog proper but might be of some
-    use. Searches the top few most helpful steam reviews for the given game
+    if hltb doesn't work. Searches the top few most helpful steam reviews for the given game
     for their own hours. The average might be somewhat helpful assuming the
     top reviews aren't written by the mouthbreathing nitwits that do "huehue 10/10"
     humor abortions and thumbed up by other mouthbreathing nitwits.
@@ -232,7 +234,7 @@ class review_times(scraper):
 
         try:
             url = self._reviews_url.format(self._game["appid"]) + url_suffix
-            logger.debug("Fetching steam review page: " + url)
+            #logger.debug("Fetching steam review page: " + url)
             req = urllib2.Request(url, None, self._http_headers)
             times = urllib2.urlopen(req)
         except urllib2.URLError:
@@ -271,6 +273,11 @@ class review_times(scraper):
                     hours.append(float(hrmatch.group(1)) * 60)
 
         self._hours = {"hours": hours, "average": round(float(sum(hours)) / len(hours), 2)}
+
+        if hours:
+            logger.debug(u"Steam reviews: {0[name]} ({0[appid]}): {1} times scraped with an average of {2:0.2f} hrs.".format(self._game, len(hours), float(self._hours["average"]) / 60))
+        else:
+            logger.warn(u"Steam reviews: {0[name]} ({0[appid]}): No times found".format(self._game))
 
         return self._hours
 

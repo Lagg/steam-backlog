@@ -54,8 +54,8 @@ class scraper(object):
 
     def _clean_game_name(self, name):
         """ Cleans up the given name so that it's more likely to show up in search results """
-        # The replace calls are to strip trademark symbols.
-        cleanedname = name.replace(u"\xae", '').replace(u"\u2122", '')
+        # The replace calls are to strip trademark symbols and other stuff that interferes with searches
+        cleanedname = name.replace(u"\xae", '').replace(u"\u2122", '').replace(": ", ' ').replace("'", '').replace(" - ", ' ')
 
         # What is about to occur here may be frightening. It is. But not moreso than
         # writing one's own hardcoded translation tables *shiver*
@@ -132,6 +132,8 @@ class hltb(scraper):
             matches = soup.findAll(class_="gamelist_details")
 
             if len(matches) > 0:
+                found_name = None
+
                 if retries > 0:
                     found_name_href = matches[0].select("h3 a")
 
@@ -142,6 +144,9 @@ class hltb(scraper):
 
                     logger.warn(u"{0[name]} ({0[appid]}) was found but only after shortening name to '{1}' giving '{2}'".format(self._game, querystring, found_name))
                     result["partial_match"] = True
+                elif found_name and found_name.lower() != querystring.lower():
+                    logger.warn(u"{0[name]} was apparently found but the search and names differ. '{1}' versus '{2}'".format(self._game, querystring, found_name))
+
                 break
             else:
                 retries += 1

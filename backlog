@@ -150,10 +150,10 @@ if __name__ == "__main__":
 
     owned_games = steamhltb.user_hours(opts.user)
 
-    total_minutes = sum(map(operator.itemgetter("playtime_forever"), owned_games))
-    my_average_minutes = round(float(total_minutes) / len(owned_games), 2)
+    total_hours = sum(map(operator.itemgetter("playtime_forever"), owned_games))
+    average_playtime = round(float(total_hours) / len(owned_games), 2)
 
-    print("Our average playtime: {0:.2f} hrs".format(my_average_minutes / 60))
+    print("Average playtime of {0}: {1:.2f} hrs".format(opts.user, average_playtime))
 
     # Filter out ignore apps after initial averages dump
     # Not using builtin here so that a bit of explicit logging can be done about
@@ -192,7 +192,7 @@ if __name__ == "__main__":
         projected_time = get_likeliest_time(game, retries=opts.name_search_retries, review_pages=opts.review_pages)
 
         if projected_time:
-            backlog_games.append((game["appid"], game["name"], projected_time / 60))
+            backlog_games.append((game["appid"], game["name"], projected_time))
 
     print("Writing backlog summary to " + opts.summary_file)
     with open(opts.summary_file, "w") as output:
@@ -204,21 +204,19 @@ if __name__ == "__main__":
     for game in played_games:
         progress.inc()
         playtime_forever = float(game["playtime_forever"])
-        if "playtime_2weeks" not in game and playtime_forever > 0 and playtime_forever < my_average_minutes:
+        if "playtime_2weeks" not in game and playtime_forever > 0 and playtime_forever < average_playtime:
             projected_time = get_likeliest_time(game, retries=opts.name_search_retries, review_pages=opts.review_pages)
 
             if not projected_time:
                 continue
 
             difference = round(100 - (100.0 / (float(projected_time) / playtime_forever)), 2)
-            projected_hours = projected_time / 60
-            playtime_hours = playtime_forever / 60
 
             if projected_time > playtime_forever:
                 if difference > opts.revisit_margin:
-                    revisit_games.append((game["appid"], game["name"], playtime_hours, projected_hours))
+                    revisit_games.append((game["appid"], game["name"], playtime_forever, projected_time))
                 else:
-                    logging.debug(u"Suppressing entry of {0[name]}: {1:.2f} / {2:.2f} difference = {3:.2f}%".format(game, playtime_hours, projected_hours, difference))
+                    logging.debug(u"Suppressing entry of {0[name]}: {1:.2f} / {2:.2f} difference = {3:.2f}%".format(game, playtime_forever, projected_time, difference))
 
     print("Writing revisitation candidates to " + opts.revisit_file)
     with open(opts.revisit_file, "w") as revisitation_output:

@@ -176,8 +176,7 @@ class hltb(scraper):
                             time_accuracy = int(cls[5:])
                             break
 
-                    # Convert to minutes for consistency with steam
-                    result["hours"][last_tidbit_type] = {"time": hrsrounded * 60, "accuracy": time_accuracy}
+                    result["hours"][last_tidbit_type] = {"time": hrsrounded, "accuracy": time_accuracy}
                 elif ' '.join(tidbit["class"]).find("time_") == -1:
                     last_tidbit_type = tidbit.text
 
@@ -186,7 +185,7 @@ class hltb(scraper):
             raise HLTBTimesNotFound(self._game)
         else:
             logger.debug(u"HLTB: {0[name]} ({0[appid]}): {1}".format(self._game,
-                ', '.join(["{0}: {1} ({2})".format(tidbit, hrs["time"] / 60, hrs["accuracy"])
+                ', '.join(["{0}: {1} ({2})".format(tidbit, hrs["time"], hrs["accuracy"])
                            for tidbit, hrs in sorted(result["hours"].items(),
                            key=lambda x: (x[1]["accuracy"], x[1]["time"]), reverse=True)])))
 
@@ -270,12 +269,12 @@ class review_times(scraper):
                 # usually the ones with the most accurate hours for
                 # obvious reasons
                 if hrmatch and titletext == "Recommended":
-                    hours.append(float(hrmatch.group(1)) * 60)
+                    hours.append(float(hrmatch.group(1)))
 
         self._hours = {"hours": hours, "average": round(float(sum(hours)) / len(hours), 2)}
 
         if hours:
-            logger.debug(u"Steam reviews: {0[name]} ({0[appid]}): {1} times scraped with an average of {2:0.2f} hrs.".format(self._game, len(hours), float(self._hours["average"]) / 60))
+            logger.debug(u"Steam reviews: {0[name]} ({0[appid]}): {1} times scraped with an average of {2:0.2f} hrs.".format(self._game, len(hours), self._hours["average"]))
         else:
             logger.warn(u"Steam reviews: {0[name]} ({0[appid]}): No times found".format(self._game))
 
@@ -321,10 +320,21 @@ class user_hours(object):
     next =  __next__
 
     def fetch(self):
-        """ Pull the user hours/game list, returns entire sorted result list """
+        """ Pull the user hours/game list, returns entire sorted result list with times converted to hours """
         self._steam_hours = sorted(steam.api.interface("IPlayerService").GetOwnedGames(steamid=self._id64,
                                    include_appinfo=1, include_played_free_games=1)["response"]["games"],
                                    key=operator.itemgetter("playtime_forever"))
         self._owned_game_count = len(self._steam_hours)
+
+        for game in self._steam_hours:
+            try:
+                game["playtime_forever"] = float(game["playtime_forever"]) / 60
+            except KeyError:
+                pass
+
+            try:
+                game["playtime_2weeks"] = float(game["playtime_2weeks"]) / 60
+            except KeyError:
+                pass
 
         return self._steam_hours

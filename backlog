@@ -104,24 +104,31 @@ def convert_arg_line(line):
 
 def get_likeliest_time(game, retries=3, review_pages=1):
     projected_time = None
+    flags = set()
 
     try:
         hltb_times = steamhltb.hltb(game, retries=retries).fetch()
 
         if hltb_times.get("partial_match"):
-            game["name"] += " (?)"
+            flags.add('?')
 
         sorted_times = sorted(hltb_times["hours"].items(), key=lambda hrs: (hrs[1]["accuracy"], hrs[1]["time"]), reverse=True)
 
         time_type, timeinfo = sorted_times[0]
         projected_time = timeinfo["time"]
+
+        if timeinfo["accuracy"] < 70:
+            flags.add("~{0[accuracy]}".format(timeinfo))
     except steamhltb.TimesNotFound:
         try:
             steam_times = steamhltb.review_times(game, pages=review_pages).fetch()
             projected_time = steam_times["average"]
-            game["name"] += " (S)"
+            flags.add('S')
         except steamhltb.TimesNotFound:
             pass
+
+    if flags:
+        game["name"] += " (" + ", ".join(flags) + ")"
 
     return projected_time
 

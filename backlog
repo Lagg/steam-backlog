@@ -96,35 +96,39 @@ def convert_arg_line(line):
 
     return map(str.strip, args)
 
-def get_likeliest_time(game, retries=3, review_pages=1):
-    projected_time = None
-    flags = set()
+class backlagg(object):
+    def __init__(self, opts):
+        self.opts = opts
 
-    try:
-        hltb_times = steamhltb.hltb(game, retries=retries).fetch()
+    def likeliest_time(self, game):
+        projected_time = None
+        flags = set()
 
-        if hltb_times.get("partial_match"):
-            flags.add('?')
-
-        sorted_times = sorted(hltb_times["hours"].items(), key=lambda hrs: (hrs[1]["accuracy"], hrs[1]["time"]), reverse=True)
-
-        time_type, timeinfo = sorted_times[0]
-        projected_time = timeinfo["time"]
-
-        if timeinfo["accuracy"] < 70:
-            flags.add("~{0[accuracy]}".format(timeinfo))
-    except steamhltb.TimesNotFound:
         try:
-            steam_times = steamhltb.review_times(game, pages=review_pages).fetch()
-            projected_time = steam_times["average"]
-            flags.add('S')
+            hltb_times = steamhltb.hltb(game, retries=self.opts.name_search_retries).fetch()
+
+            if hltb_times.get("partial_match"):
+                flags.add('?')
+
+            sorted_times = sorted(hltb_times["hours"].items(), key=lambda hrs: (hrs[1]["accuracy"], hrs[1]["time"]), reverse=True)
+
+            time_type, timeinfo = sorted_times[0]
+            projected_time = timeinfo["time"]
+
+            if timeinfo["accuracy"] < 70:
+                flags.add("~{0[accuracy]}".format(timeinfo))
         except steamhltb.TimesNotFound:
-            pass
+            try:
+                steam_times = steamhltb.review_times(game, pages=self.opts.review_pages).fetch()
+                projected_time = steam_times["average"]
+                flags.add('S')
+            except steamhltb.TimesNotFound:
+                pass
 
-    if flags:
-        game["name"] += " (" + ", ".join(flags) + ")"
+        if flags:
+            game["name"] += " (" + ", ".join(flags) + ")"
 
-    return projected_time
+        return projected_time
 
 if __name__ == "__main__":
     cmdline = argparse.ArgumentParser(description="Write out suggestions for your backlog and potential games to revisit", fromfile_prefix_chars='@')
@@ -140,6 +144,8 @@ if __name__ == "__main__":
     cmdline.add_argument("-p", "--review-pages", default=1, type=int, help="How many pages of steam reviews to fetch when it's used. More pages mean more accurate averages but also a higher chance of being throttled. Such games are indicated by a '(S)' next to the name.")
     cmdline.convert_arg_line_to_args = convert_arg_line
     opts = cmdline.parse_args()
+
+    main = backlagg(opts)
 
     ignored_apps = []
 
@@ -214,7 +220,7 @@ if __name__ == "__main__":
         if game["playtime_forever"] > 0:
             continue
 
-        projected_time = get_likeliest_time(game, retries=opts.name_search_retries, review_pages=opts.review_pages)
+        projected_time = main.likeliest_time(game)
 
         if projected_time:
             backlog_games.append((game["appid"], game["name"], projected_time))
@@ -230,7 +236,7 @@ if __name__ == "__main__":
         progress.inc()
         playtime_forever = float(game["playtime_forever"])
         if "playtime_2weeks" not in game and playtime_forever > 0 and playtime_forever < average_playtime:
-            projected_time = get_likeliest_time(game, retries=opts.name_search_retries, review_pages=opts.review_pages)
+            projected_time = main.likeliest_time(game)
 
             if not projected_time:
                 continue

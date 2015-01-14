@@ -49,11 +49,7 @@ def longest_elem(iterable):
 
     return sorted(map(len, iterable), reverse=True)[0]
 
-def write_game_rows(stream, rows):
-    """
-    Writes fancy and nicely formatted TSVs to a given output stream
-    rows: a list of tuples that can be converted to strings
-    """
+def format_game_rows(rows):
     longest_items = [0] * (sorted(map(len, rows), reverse=True)[0])
 
     for row in rows:
@@ -68,6 +64,7 @@ def write_game_rows(stream, rows):
             if itemlen > longest_items[i]:
                 longest_items[i] = itemlen
 
+    lines = []
     for row in rows:
         formatted_items = []
 
@@ -80,7 +77,19 @@ def write_game_rows(stream, rows):
             formatted_items.append((u"{0:<" + str(longest_items[i]) + "}").format(item))
 
         if formatted_items:
-            stream.write(('\t'.join(formatted_items) + '\n').encode("utf-8"))
+            lines.append('\t'.join(formatted_items))
+
+    return lines
+
+def write_game_rows(stream, rows):
+    """
+    Writes fancy and nicely formatted TSVs to a given output stream
+    rows: a list of tuples that can be converted to strings
+    """
+
+    lines = format_game_rows(rows)
+    if lines:
+        stream.write(('\n'.join(lines)).encode("utf-8"))
 
 def convert_arg_line(line):
     tok = line.find('=')
@@ -123,7 +132,7 @@ if __name__ == "__main__":
     cmdline.add_argument("-s", "--summary-file", default="summary.tsv", help="Filename to write the backlog order suggestions")
     cmdline.add_argument("-r", "--revisit-file", default="revisit.tsv", help="Filename to write revisit suggestions")
     cmdline.add_argument("-e", "--error-file", default="errors.log", help="Filename to write errors and warnings. Set /dev/null to suppress")
-    cmdline.add_argument("-i", "--ignore", default="", help="A comma separated list of app IDs to ignore")
+    cmdline.add_argument("-i", "--ignore", default="", help="A comma separated list of app IDs to ignore or an ignore list filename (see README for format)")
     cmdline.add_argument("-v", "--verbose", action="store_true", help="Verbose logging")
     cmdline.add_argument("-m", "--revisit-margin", default=25, type=int, help="Margin of error percentage. Used to see if playtimes are sufficiently different to merit revisitation.")
     cmdline.add_argument("-n", "--name-search-retries", default=0, type=int, help="How many times to retry a search for a game name using shorter strings or a different permutation. Such games are indicated by a '(?)' next to the name.")
@@ -131,11 +140,26 @@ if __name__ == "__main__":
     cmdline.convert_arg_line_to_args = convert_arg_line
     opts = cmdline.parse_args()
 
-    try:
-        ignored_apps = [int(app.strip()) for app in opts.ignore.split(',') if app.strip()]
-    except ValueError as e:
-        logging.error("Bad app ID given in ignore list: " + str(e))
-        raise SystemExit
+    ignored_apps = []
+
+    if opts.ignore:
+        try:
+            try:
+                with open(opts.ignore, "r") as ignorestream:
+                    while True:
+                        line = ignorestream.readline()
+
+                        if not line:
+                            break
+
+                        line = filter(None, line.strip("\n ").replace(' ', '\t').split('\t'))
+                        if line and line[0] != '#':
+                            ignored_apps.append(int(line[0]))
+            except IOError:
+                ignored_apps = [int(app.strip()) for app in opts.ignore.split(',') if app.strip()]
+        except ValueError as e:
+            logging.error("Bad app ID given in ignore list: " + str(e))
+            raise SystemExit
 
     loglevel = logging.WARN
 
@@ -175,7 +199,7 @@ if __name__ == "__main__":
 
     if filtered_games:
         logging.warn(u"Filtering {0} games:\n  {1}".format(len(filtered_games),
-            "\n  ".join([game["name"] + " (" + str(game["appid"]) + ")" for game in sorted(filtered_games, key=operator.itemgetter("name"))])))
+            "\n  ".join(format_game_rows([(game["appid"], game["name"]) for game in sorted(filtered_games, key=operator.itemgetter("name"))]))))
 
     if bad_appids:
         logging.warn(u"{0} bad app IDs: {1}".format(len(bad_appids), ', '.join([str(app) for app in bad_appids])))

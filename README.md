@@ -11,6 +11,17 @@ both Steam and HLTB and generates combined summaries. The API (as in the symbols
 volatile to make a pypi-able setuptools package but it'll likely remain as a single file so you should just be able to drop
 it into your import path. See the docstrings for further documentation.
 
+## Dedicated ignore file ##
+
+Since my ignore CSVs started getting quite large (after all, HLTB times are often overestimated and I didn't want finished stuff showing in revisit lines)  I added a dedicated format
+for more expressively adding ignored games. Its syntax is similar to git's interactive rebasing. Lines starting with `#` are ignored and otherwise the first token is interpreted as an app ID. Example:
+
+    # This is a comment
+    440 This will be interpreted as TF2's app ID
+    But this line will probably lead to an error since "But" isn't an app ID
+
+Not only does this make it a little easier to see at a glance what you ignored but it also allows you to directly paste chunks from the output TSVs and keep a little notepad of why you blocked it.
+
 ## Interpreting the output ##
 
 Though the column layout is subject to change, the output format for suggested games to play and revisit are simple tab-separated values. The following is a

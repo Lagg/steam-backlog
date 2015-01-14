@@ -43,12 +43,6 @@ class progress_line(object):
         self._lastline = self._fmt.format(self._start, self._end)
         sys.stderr.write(self._lastline)
 
-def longest_elem(iterable):
-    if not iterable:
-        return 0
-
-    return sorted(map(len, iterable), reverse=True)[0]
-
 def format_game_rows(rows):
     longest_items = [0] * (sorted(map(len, rows), reverse=True)[0])
 

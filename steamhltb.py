@@ -5,10 +5,12 @@ Distributed under the ISC License. See README
 
 import urllib2
 from urllib import urlencode
+from urlparse import urlparse, parse_qs
 import re
 import operator
 import logging
 import unicodedata
+import json
 
 import steam
 from bs4 import BeautifulSoup
@@ -286,6 +288,69 @@ class review_times(scraper):
         return self._hours
 
 
+class storefront_metadata(scraper):
+    """ Implements a scraper that grabs stuff from game storefront pages
+    such as categories and tags that otherwise aren't available via API.
+    """
+    _store_url = "http://store.steampowered.com/app/{0}"
+    _tag_exp = re.compile(r"InitAppTagModal\([0-9\s]+,\s*(\[{.+}\])")
+
+    def __init__(self, game):
+        self._game = game
+        self._store_page = None
+
+    @property
+    def categories(self):
+        """ Fetch categories for the game. These are different from tags. They're
+        the things in the lower sidebar that say things like "Full controller support" or
+        "Steam trading cards"
+        """
+        if not self._store_page and not self.fetch():
+            return None
+
+        categories = self._store_page.find("div", attrs={"id": "category_block"})
+
+        if categories:
+            cats = []
+            entries = categories.findAll("div", class_="game_area_details_specs")
+
+            for entry in entries:
+                cat = entry.find("a", class_="name")
+
+                try:
+                    categoryid = parse_qs(urlparse(cat["href"]).query).get("category2", [0])[0]
+                except KeyError:
+                    continue
+
+                cats.append({"name": cat.text, "catid": int(categoryid)})
+
+            return cats
+
+    def fetch(self):
+        try:
+            req = urllib2.Request(self._store_url.format(self._game["appid"]), None, self._http_headers)
+            self._store_page = BeautifulSoup(urllib2.urlopen(req).read())
+            return self._store_page
+        except urllib2.URLError as e:
+            logger.error(u"Steam storefront connection error ({1}): {0[name]}".format(self._game, e))
+            return None
+
+    @property
+    def tags(self):
+        """ Fetch tags for the game """
+        # I find it thoroughly amusing that valve has json feeds for other tag related stuff including POSTing new ones, but not getting the set of tags for a given game
+        if not self._store_page and not self.fetch():
+            return None
+
+        scripts = self._store_page.findAll("script", attrs={"type": "text/javascript"})
+
+        for script in scripts:
+            matches = self._tag_exp.search(script.text)
+
+            if matches:
+                return json.loads(matches.group(1))
+
+
 class user_hours(object):
     """ An iterable that fetches hours
     (and associated game info) for a given
@@ -343,3 +408,28 @@ class user_hours(object):
                 pass
 
         return self._steam_hours
+
+class steam_achievements(object):
+    def __init__(self, game):
+        self._game = game
+        self._achievements = None
+
+    def __iter__(self):
+        return next(self)
+
+    def __next__(self):
+        if not self._achievements:
+            self.fetch()
+
+        for achievement in self._achievements:
+            yield achievement
+    next = __next__
+
+    def fetch(self):
+        achievements = steam.api.interface("ISteamUserStats").GetGlobalAchievementPercentagesForApp(version=2, gameid=self._game["appid"])
+
+        try:
+            self._achievements = achievements["achivementpercentages"]["achievements"]
+            return self._achievements
+        except KeyError:
+            return None

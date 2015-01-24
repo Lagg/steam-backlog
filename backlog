@@ -83,7 +83,7 @@ def write_game_rows(stream, rows):
 
     lines = format_game_rows(rows)
     if lines:
-        stream.write(('\n'.join(lines)).encode("utf-8"))
+        stream.write(('\n'.join(lines) + '\n'))
 
 def convert_arg_line(line):
     tok = line.find('=')
@@ -159,7 +159,7 @@ if __name__ == "__main__":
                         if not line:
                             break
 
-                        line = filter(None, line.strip("\n ").replace(' ', '\t').split('\t'))
+                        line = [tok for tok in line.strip("\n ").replace(' ', '\t').split('\t') if tok]
                         if line and line[0] != '#':
                             ignored_apps.append(int(line[0]))
             except IOError:

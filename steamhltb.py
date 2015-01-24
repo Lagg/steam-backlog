@@ -3,9 +3,9 @@ Copyright (c) 2014+, Anthony Garcia <anthony@lagg.me>
 Distributed under the ISC License. See README
 """
 
-import urllib2
-from urllib import urlencode
-from urlparse import urlparse, parse_qs
+from urllib.parse import urlencode, urlparse, parse_qs
+from urllib.request import urlopen, Request
+from urllib.error import URLError
 import re
 import operator
 import logging
@@ -107,13 +107,13 @@ class hltb(scraper):
 
     def _fetch_soup(self, name):
         """ I feel like a bit of an asshole for doing this, hence the guilty header. Sorry :( """
-        query = urlencode({"queryString": name.encode("utf-8")})
+        query = urlencode({"queryString": name.encode("utf-8")}).encode("ascii")
 
         try:
-            playtimes_request = urllib2.Request(self._name_search_url, query, self._http_headers)
-            playtimes = urllib2.urlopen(playtimes_request)
+            playtimes_request = Request(self._name_search_url, query, self._http_headers)
+            playtimes = urlopen(playtimes_request)
             return BeautifulSoup(playtimes.read())
-        except urllib2.URLError:
+        except URLError:
             logger.error(u"HLTB connection error: {0[name]}".format(self._game))
             return None
 
@@ -230,20 +230,22 @@ class review_times(scraper):
 
         if last_soup:
             pageform = last_soup.find("form")
-            nextpage_params = []
 
-            for tag in pageform.findAll(attrs={"type": "hidden"}):
-                nextpage_params.append(urlencode({tag["name"]: tag["value"]}))
+            if pageform:
+                nextpage_params = []
 
-            if nextpage_params:
-                url_suffix = "&" + "&".join(nextpage_params)
+                for tag in pageform.findAll(attrs={"type": "hidden"}):
+                    nextpage_params.append(urlencode({tag["name"]: tag["value"]}))
+
+                if nextpage_params:
+                    url_suffix = "&" + "&".join(nextpage_params)
 
         try:
             url = self._reviews_url.format(self._game["appid"]) + url_suffix
             #logger.debug("Fetching steam review page: " + url)
-            req = urllib2.Request(url, None, self._http_headers)
-            times = urllib2.urlopen(req)
-        except urllib2.URLError:
+            req = Request(url, None, self._http_headers)
+            times = urlopen(req)
+        except URLError:
             logger.error(u"Steam review page connection error: {0[name]}".format(self._game))
             raise SteamTimesNotFound(self._game)
 
@@ -328,10 +330,10 @@ class storefront_metadata(scraper):
 
     def fetch(self):
         try:
-            req = urllib2.Request(self._store_url.format(self._game["appid"]), None, self._http_headers)
-            self._store_page = BeautifulSoup(urllib2.urlopen(req).read())
+            req = Request(self._store_url.format(self._game["appid"]), None, self._http_headers)
+            self._store_page = BeautifulSoup(urlopen(req).read())
             return self._store_page
-        except urllib2.URLError as e:
+        except URLError as e:
             logger.error(u"Steam storefront connection error ({1}): {0[name]}".format(self._game, e))
             return None
 

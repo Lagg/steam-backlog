@@ -93,7 +93,7 @@ class hltb(scraper):
 
     # The URL to POST the game name query to. Could yield better or at least different
     # results if the params were fiddled with. Let me know if you find anything good.
-    _name_search_url = "http://www.howlongtobeat.com/search_main.php?t=games&page=1&sorthead=popular&sortd=Normal%20Order&plat=&detail=0"
+    _name_search_url = "http://howlongtobeat.com/search_main.php?t=games&page=1&sorthead=popular&sortd=Normal%20Order&plat=&detail=0"
 
     # The regexp that gets ran on the area that looks like the hours are at.
     _hours_exp = re.compile(r"([0-9]+)([^0-9]*) Hours")
